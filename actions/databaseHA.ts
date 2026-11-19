@@ -11,6 +11,7 @@
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
 import { ensureAuth } from "@/lib/auth";
+import { recordAuditEvent } from "@/lib/auditLog";
 import { generateHACompose, generateAllHAConfigs, type DatabaseHAConfig } from "@/lib/metadata";
 import path from 'path';
 import YAML from 'yaml';
@@ -590,6 +591,13 @@ export async function simulateFailover(
                 }
             );
 
+            await recordAuditEvent({
+                userId: ownerId,
+                action: 'ha.failover',
+                resource: composeId,
+                metadata: { fromNode, toNode, duration },
+            });
+
             return { 
                 success: true, 
                 message: 'Failover completed successfully',
@@ -665,6 +673,13 @@ export async function triggerBackup(composeId: string): Promise<BackupResult> {
                 { _id: new ObjectId(composeId), userId: ownerId },
                 { $push: { 'metadata.backups': backupRecord } as any }
             );
+
+            await recordAuditEvent({
+                userId: ownerId,
+                action: 'ha.backup',
+                resource: composeId,
+                metadata: { fileName, duration },
+            });
 
             return { 
                 success: true, 
@@ -743,6 +758,12 @@ export async function restoreBackup(composeId: string, backupId: string): Promis
                 { project: composeProjectName(id), yamlPath },
             );
             const duration = Date.now() - startTime;
+            await recordAuditEvent({
+                userId: ownerId,
+                action: 'ha.restore',
+                resource: composeId,
+                metadata: { fileName, duration },
+            });
 
             return { 
                 success: true, 

@@ -114,6 +114,9 @@ export default function ComposeRow(data: ComposeLine) {
                             <p className="text-xs text-amber-600 font-semibold">
                                 Warning: the public YAML includes environment variables and may contain database passwords.
                             </p>
+                            <p className="text-xs text-slate-500">
+                                Links expire automatically (30 days by default; configure SHARE_TTL_DAYS).
+                            </p>
                         </PopoverContent>
                     </Popover>
                     {data.status && (

@@ -13,6 +13,8 @@ import { ObjectId } from "bson";
 import { ensureAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { isValidObjectId } from "@/lib/validation";
+import { isShareActive, shareExpiresAt } from "@/lib/sharePolicy";
+import { recordAuditEvent } from "@/lib/auditLog";
 
 const SITE_URL = process.env.URL || '';
 if (!SITE_URL) {
@@ -44,19 +46,43 @@ export async function shareCompose(composeId: string) {
     revalidatePath("/dashboard/deploys");
 
     if (existingShare) {
+        if (isShareActive(existingShare as any)) {
+            return `${SITE_URL}/share?id=${existingShare._id.toString()}`;
+        }
+        // Refresh an expired share instead of creating a second document.
+        const expiresAt = shareExpiresAt();
+        await shares.updateOne(
+            { _id: existingShare._id, userId },
+            { $set: { access: 'public', expiresAt } },
+        );
+        await recordAuditEvent({
+            userId,
+            action: 'share.refresh',
+            resource: composeId,
+            metadata: { shareId: existingShare._id.toString(), expiresAt },
+        });
         return `${SITE_URL}/share?id=${existingShare._id.toString()}`;
     }
 
+    const expiresAt = shareExpiresAt();
     const insert = await shares.insertOne({
         access: "public",
         composeId: new ObjectId(composeId),
         createdAt: new Date().getTime(),
+        expiresAt,
         userId,
     });
 
     if (!insert.insertedId) {
         throw new Error("Could not share the docker compose file");
     }
+
+    await recordAuditEvent({
+        userId,
+        action: 'share.create',
+        resource: composeId,
+        metadata: { shareId: insert.insertedId.toString(), expiresAt },
+    });
 
     return `${SITE_URL}/share?id=${insert.insertedId.toString()}`;
 }
@@ -71,8 +97,14 @@ export const getComposeByShareId = async (shareId: string) => {
 
     try {
         const compose = await collection.aggregate([
-            // Public shares are the only ones exposed by this loader.
-            { $match: { _id: new ObjectId(shareId), access: "public" } },
+            // Public and non-expired shares are the only ones exposed.
+            {
+                $match: {
+                    _id: new ObjectId(shareId),
+                    access: "public",
+                    $or: [{ expiresAt: { $exists: false } }, { expiresAt: { $gt: Date.now() } }],
+                }
+            },
             {
                 $lookup: {
                     from: "composes",

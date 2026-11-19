@@ -35,6 +35,9 @@ export function ensureIndexes(): Promise<void> {
             ['reset_code.code (unique)', db.collection('reset_code').createIndex({ code: 1 }, { unique: true })],
             ['reset_code.createdAt (ttl 1d)', db.collection('reset_code').createIndex({ createdAt: 1 }, { expireAfterSeconds: 86_400 })],
             ['csrf_token.createdAt (ttl 1h)', db.collection('csrf_token').createIndex({ createdAt: 1 }, { expireAfterSeconds: 3_600 })],
+            ['audit_log.createdAt (ttl 90d)', db.collection('audit_log').createIndex({ createdAt: 1 }, { expireAfterSeconds: 7_776_000 })],
+            ['audit_log.userId', db.collection('audit_log').createIndex({ userId: 1, createdAt: -1 })],
+            ['audit_log.action', db.collection('audit_log').createIndex({ action: 1, createdAt: -1 })],
         ];
 
         const results = await Promise.allSettled(tasks.map(([, promise]) => promise));

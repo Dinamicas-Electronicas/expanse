@@ -16,6 +16,9 @@ services:
       - ALLOW_COMPOSE_BUILD=${ALLOW_COMPOSE_BUILD:-false}
       - ALLOW_HOST_PROJECT_OPS=${ALLOW_HOST_PROJECT_OPS:-false}
       - TRUST_PROXY=${TRUST_PROXY:-true}
+      - SHARE_TTL_DAYS=${SHARE_TTL_DAYS:-30}
+      - EXPORT_RETENTION_DAYS=${EXPORT_RETENTION_DAYS:-7}
+      - TMP_RETENTION_DAYS=${TMP_RETENTION_DAYS:-7}
       - URL=${APP_URL:-http://localhost:4000}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set; run pnpm generate-secrets}
       - MONGODB_URI=mongodb://${DB_USER:?DB_USER must be set}:${DB_PASS:?DB_PASS must be set}@db:27017/expanse?authSource=admin

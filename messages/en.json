@@ -101,7 +101,11 @@
     "unexpectedBackupError": "An unexpected error occurred during backup",
     "remoteNodeAdded": "Remote node {host} added",
     "failedToAddRemoteNode": "Failed to add remote node",
-    "pleaseEnterHostAddress": "Please enter a host address"
+    "pleaseEnterHostAddress": "Please enter a host address",
+    "signOutEverywhere": "Sign out of all devices",
+    "signOutEverywhereDescription": "Immediately revoke every active session, including this one. You will need to sign in again on every device.",
+    "signedOutEverywhere": "All sessions have been revoked",
+    "signOutEverywhereFailed": "Could not revoke the sessions"
   },
   "deploy": {
     "cpu": "CPU",

@@ -116,6 +116,28 @@ Pendiente de P1: i18n completa, accesibilidad axe/contraste, reconexión automá
 servicios al proxy HA y pruebas E2E. P2 sigue intacto (MFA, shares firmados, audit log,
 límites de recursos, socket proxy).
 
+### 1.3 Implementado en el ciclo 5 (bloque P2, primera parte)
+
+| Área | Hallazgos | Implementación |
+|---|---|---|
+| Auditoría | ARC-06 | `lib/auditLog.ts` + colección `audit_log` con TTL de 90 días. Registra login/registro/reset, borrado de cuenta/proyecto, deploy/stop/restart, borrado de contenedores/volúmenes, terminal, failover/backup/restore y creación de shares. |
+| Sesiones | SEC-28 | `logoutEverywhere` incrementa `sessionVersion` y revoca todos los JWT; botón en Settings → Account. |
+| Shares | SEC-30 | Caducidad (`SHARE_TTL_DAYS`, 30 días por defecto; `0` = nunca); shares expirados rechazados en visor, `/api/compose` y `/api/export/png`; re-compartir refresca la fecha. |
+| Retención | STB-15 | Limpieza diaria de PNG exportados y `/tmp/expanse-*` según `EXPORT_RETENTION_DAYS`/`TMP_RETENTION_DAYS`. |
+
+**Verificación del ciclo 5**
+
+```text
+pnpm typecheck   ✅
+pnpm lint        ✅ 0 errores (3 warnings preexistentes)
+pnpm test        ✅ 20 archivos, 119 tests OK, 2 skipped
+pnpm build       ✅ standalone
+```
+
+Pendiente de P2: MFA, protección de shares con contraseña/firma, límites de recursos por
+usuario, socket proxy/rootless y migraciones de esquema. También quedan i18n completa,
+accesibilidad y E2E del bloque P1.
+
 ---
 
 ## 2. Alcance, método y estado
@@ -125,7 +147,7 @@ límites de recursos, socket proxy).
 ```bash
 pnpm typecheck          # OK (0 errores)
 pnpm lint               # OK (0 errores, 3 warnings de react-refresh)
-pnpm test               # 19 archivos, 116 tests OK, 2 skipped
+pnpm test               # 20 archivos, 119 tests OK, 2 skipped
 pnpm audit --audit-level=high  # 0 advisories
 ```
 

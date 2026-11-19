@@ -18,6 +18,7 @@ import { randomBytes } from 'node:crypto';
 import YAML from 'yaml';
 import { ActionError, assertManagedProject, requireAdmin, requireCompose, requireUser } from "@/lib/authorization";
 import { validateComposePolicy } from "@/lib/composePolicy";
+import { recordAuditEvent } from "@/lib/auditLog";
 import { formatPort, parsePortEntry } from "@/lib/ports";
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
@@ -315,9 +316,17 @@ async function runComposeInternal(
             );
         }
 
+        await recordAuditEvent({
+            userId: session.userId,
+            action: 'deploy.run',
+            resource: id,
+            metadata: { ha: effectiveHa?.replication?.enabled === true },
+        });
+
         return { success: true, message: 'Services started successfully' };
     } catch (error: any) {
         console.error('Docker Compose Up Error:', error);
+        await recordAuditEvent({ userId: session.userId, action: 'deploy.failed', resource: id, result: 'failure' });
         const errText = error.message || error.stderr || "";
         const regex = /:(\d+)(?:\/tcp)?.*(?:already in use|already allocated)/i;
         const match = errText.match(regex) || errText.match(/Bind for.*:(\d+) failed/i);
@@ -382,6 +391,7 @@ export async function stopCompose(composeId: string) {
         });
         console.log('Docker Compose Down:', stdout);
         if (stderr) console.error('Docker Compose Down Stderr:', stderr);
+        await recordAuditEvent({ userId: session.userId, action: 'deploy.stop', resource: id });
         return { success: true, message: 'Services stopped successfully' };
     } catch (error: any) {
         console.error('Docker Compose Down Error:', error);
@@ -462,6 +472,7 @@ async function restartComposeInternal(composeId: string, yamlContent: string) {
 
         console.log('Docker Compose Restart:', stdout);
         if (stderr) console.error('Docker Compose Restart Stderr:', stderr);
+        await recordAuditEvent({ userId: session.userId, action: 'deploy.restart', resource: id });
         return { success: true, message: 'Services restarted successfully' };
     } catch (error: any) {
         console.error('Docker Compose Restart Error:', error);
@@ -832,6 +843,13 @@ export async function removeProjectByName(projectName: string, deleteVolumes: bo
             await runDocker(['network', 'rm', ...names]);
         }
 
+        await recordAuditEvent({
+            userId: session.userId,
+            action: 'project.remove',
+            resource: project,
+            metadata: { deleteVolumes },
+        });
+
         return {
             success: true,
             message: `Project "${projectName}" deleted${deleteVolumes ? " along with all persistent volumes" : " (volumes preserved)"}.`
@@ -863,6 +881,7 @@ export async function removeContainer(containerId: string) {
         await runDocker(['stop', container]).catch(() => { });
         const { stdout } = await runDocker(['rm', '-f', container]);
         console.log('Remove container:', stdout);
+        await recordAuditEvent({ userId: session.userId, action: 'container.remove', resource: container });
         return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message };
@@ -875,6 +894,7 @@ export async function removeVolume(volumeName: string) {
         const volume = await requireVolumeAccess(volumeName, session);
         const { stdout } = await runDocker(['volume', 'rm', '-f', volume]);
         console.log('Remove volume:', stdout);
+        await recordAuditEvent({ userId: session.userId, action: 'volume.remove', resource: volume });
         return { success: true };
     } catch (error: any) {
         return { success: false, error: error.message };
@@ -1019,6 +1039,12 @@ export async function execDockerCommand(containerId: string, command: string) {
         // Arguments are passed as an array: no shell escaping/interpolation,
         // the command itself is still executed by `sh -c` inside the container.
         const { stdout, stderr } = await runDocker(['exec', container, 'sh', '-c', command]);
+        await recordAuditEvent({
+            userId: session.userId,
+            action: 'container.exec',
+            resource: container,
+            metadata: { commandLength: command.length },
+        });
 
         return { success: true, output: stdout || stderr || "Command executed" };
     } catch (error: any) {

@@ -246,6 +246,9 @@ allá de `docker compose`).
 | `ALLOW_COMPOSE_BUILD` | No | Permite `build:` en los Compose desplegados. Por defecto `false`. |
 | `ALLOW_HOST_PROJECT_OPS` | No | Permite a un admin gestionar proyectos/contenedores que no son de Expanse. Por defecto `false`. |
 | `TRUST_PROXY` | No | Confía en `X-Forwarded-For` para el rate limit (pon `false` si expones la app sin proxy). |
+| `SHARE_TTL_DAYS` | No | Caducidad de los enlaces compartidos en días (`0` = nunca). Por defecto 30. |
+| `EXPORT_RETENTION_DAYS` | No | Días que se conservan los PNG exportados. Por defecto 7. |
+| `TMP_RETENTION_DAYS` | No | Días que se conservan los directorios `/tmp/expanse-*`. Por defecto 7. |
 
 > **Roles:** el primer usuario creado es `admin`. Las operaciones de host (borrar
 > contenedores/volúmenes ajenos, ejecutar comandos, gestionar proyectos que no empiezan por
@@ -462,9 +465,9 @@ Notas:
 
 ## ✅ Calidad y tests
 
-- **Vitest** con jsdom: 19 archivos y 118 casos (116 activos) que cubren validación,
+- **Vitest** con jsdom: 20 archivos y 121 casos (119 activos) que cubren validación,
   sesión, rate limit, ejecución Docker, generación de Compose/HA, plantillas, stores,
-  política de Compose, autorización de proyectos, imágenes y puertos.
+  política de Compose, autorización de proyectos, imágenes, puertos y caducidad de shares.
 - Tests de integración que renderizan cada plantilla y la validan con la CLI real de
   Compose (se omiten si Docker no está disponible).
 - CI en GitHub Actions: `lint`, `typecheck`, cabeceras de licencia, tests y `pnpm audit`.
@@ -490,6 +493,10 @@ Medidas implementadas:
 
 - **RBAC:** el primer usuario es `admin`; las operaciones de host exigen ese rol y los
   recursos no gestionados requieren `ALLOW_HOST_PROJECT_OPS=true`.
+- **Auditoría:** las operaciones sensibles se registran en `audit_log` (TTL 90 días) sin
+  secretos ni contenido de comandos.
+- **Sesiones revocables:** `logoutEverywhere` invalida todos los JWT vía `sessionVersion`.
+- **Shares caducables:** los enlaces expiran según `SHARE_TTL_DAYS` (30 días por defecto).
 - **Propiedad por proyecto:** todas las acciones Docker cargan el Compose filtrando por
   `userId`; el `_id` de un proyecto no es una capability.
 - **Política de Compose:** se rechazan `privileged`, `cap_add`, `devices`, `pid/ipc/uts`,

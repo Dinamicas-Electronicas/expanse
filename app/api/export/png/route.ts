@@ -12,6 +12,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { getDb } from '@/lib/mongodb';
 import { ObjectId } from 'bson';
+import { isShareActive } from '@/lib/sharePolicy';
 
 export async function GET(request: NextRequest) {
     try {
@@ -35,9 +36,9 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Share not found' }, { status: 404 });
         }
 
-        // Only explicitly public shares can be exported.
-        if (share.access !== 'public') {
-            return NextResponse.json({ error: 'Share is not public' }, { status: 403 });
+        // Only explicitly public, non-expired shares can be exported.
+        if (!isShareActive(share as any)) {
+            return NextResponse.json({ error: 'Share is not public or has expired' }, { status: 403 });
         }
 
         const composeId = share.composeId;

@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTrigger } from "@/components/ui/dialog";
-import { deleteUser } from "@/actions/userActions";
+import { deleteUser, logoutEverywhere } from "@/actions/userActions";
 import { exportAllProjects, exportToGoogleDrive } from "@/actions/backupActions";
 import { getLocalSystemInfo, saveRemoteNodeConfig } from "@/actions/systemActions";
 import toast from "react-hot-toast";
@@ -67,6 +67,17 @@ export default function Settings({ init }: { init?: settingsInitData }) {
             window.location.href = "/"
         } catch (e) {
             toast.error(t('errorDeletingAccount'))
+            console.error(e)
+        }
+    }
+
+    async function handleLogoutEverywhere() {
+        try {
+            await logoutEverywhere()
+            toast.success(t('signedOutEverywhere'))
+            window.location.href = "/login"
+        } catch (e) {
+            toast.error(t('signOutEverywhereFailed'))
             console.error(e)
         }
     }
@@ -302,6 +313,22 @@ export default function Settings({ init }: { init?: settingsInitData }) {
                 </TabsContent>
 
                 <TabsContent value="security" className="mt-6 animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="bg-slate-900/40 border border-white/10 rounded-2xl p-8 shadow-xl mb-6">
+                        <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                            <ShieldAlert className="w-5 h-5 text-amber-400" />
+                            {t('signOutEverywhere')}
+                        </h3>
+                        <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                            {t('signOutEverywhereDescription')}
+                        </p>
+                        <Button
+                            onClick={handleLogoutEverywhere}
+                            className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-8"
+                        >
+                            {t('signOutEverywhere')}
+                        </Button>
+                    </div>
+
                     <div className="bg-rose-500/5 border border-rose-500/10 rounded-2xl p-8 shadow-xl">
                         <h3 className="text-xl font-bold text-rose-500 mb-4 flex items-center gap-2">
                             <ShieldAlert className="w-5 h-5" />

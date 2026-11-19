@@ -6,6 +6,23 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — Security & compatibility maintenance
 
+### Security & operations (P2 cycle)
+
+- **Audit log:** sensitive operations (login, register, password reset, account
+  deletion, deploy/stop/restart, project/container/volume removal, terminal
+  execution, HA failover/backup/restore, share creation) are appended to
+  `audit_log` with a 90-day TTL. Events never include secrets or command text.
+- **Sign out everywhere:** new `logoutEverywhere` action bumps `sessionVersion`
+  and revokes every JWT; exposed in Settings → Account.
+- **Share expiry:** links now expire after `SHARE_TTL_DAYS` (default 30; `0` =
+  never). Expired shares are rejected by the share page, `/api/compose` and
+  `/api/export/png`; re-sharing refreshes the expiry.
+- **Retention:** a daily maintenance job removes PNG exports older than
+  `EXPORT_RETENTION_DAYS` (7) and `/tmp/expanse-*` directories older than
+  `TMP_RETENTION_DAYS` (7).
+- New env vars documented: `SHARE_TTL_DAYS`, `EXPORT_RETENTION_DAYS`,
+  `TMP_RETENTION_DAYS`.
+
 ### Stability & performance (P1 cycle)
 
 - **Optimistic concurrency on save:** `registerCompose` accepts the

@@ -25,6 +25,7 @@ import { createSessionToken, setSessionCookie } from "@/lib/session";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 import { createUserRecord } from "@/lib/users";
 import { isValidObjectId } from "@/lib/validation";
+import { recordAuditEvent } from "@/lib/auditLog";
 import {
     emailSchema,
     loginCredentialsSchema,
@@ -71,6 +72,7 @@ export async function createOrLoginUser(email: string, data: any): Promise<strin
         userExist.email,
         Number(userExist.sessionVersion ?? 0),
     ));
+    await recordAuditEvent({ userId: userExist._id.toString(), action: 'auth.login' });
     return userExist._id.toString();
 }
 
@@ -130,6 +132,7 @@ export async function registerUser(email: string, password: string, company: str
         }
 
         await setSessionCookie(await createSessionToken(id, input.email, 0));
+        await recordAuditEvent({ userId: id, action: 'auth.register' });
 
         if (Object.keys(parsedData)?.length === 0) {
             return { ok: true, data: "" };
@@ -274,6 +277,7 @@ export async function loginUser(prevState: any, formData: FormData) {
             user.email,
             Number(user.sessionVersion ?? 0),
         ));
+        await recordAuditEvent({ userId: user._id.toString(), action: 'auth.login' });
 
         if (data) {
             const parsedData = JSON.parse(data);
@@ -422,6 +426,7 @@ export const deleteUser = async (password?: string) => {
 
         await userCollection.deleteOne({ _id: userId });
         (await cookies()).delete("token");
+        await recordAuditEvent({ userId, action: 'account.delete' });
     } catch (error) {
         console.error("Error deleting user:", error);
         throw new Error("Failed to delete account");
@@ -431,6 +436,26 @@ export const deleteUser = async (password?: string) => {
 
 export const logout = async () => {
     (await cookies()).delete("token");
+    return { success: true };
+};
+
+/**
+ * Invalidates every JWT issued so far (including this one) by bumping the
+ * user's sessionVersion, then clears the current cookie.
+ */
+export const logoutEverywhere = async () => {
+    const payload = await ensureAuth();
+    if (payload.userId === 'build-mode') {
+        return { success: true };
+    }
+
+    const userId = new ObjectId(payload.userId as string);
+    await (await getDb()).collection("users").updateOne(
+        { _id: userId },
+        { $inc: { sessionVersion: 1 } },
+    );
+    (await cookies()).delete("token");
+    await recordAuditEvent({ userId, action: 'auth.logout_all' });
     return { success: true };
 };
 
@@ -452,6 +477,7 @@ export const deleteCompose = async (composeId: string) => {
         throw new Error("Compose not found");
     }
 
+    await recordAuditEvent({ userId, action: 'compose.delete', resource: composeId });
     revalidatePath("/dashboard", "page");
     return true;
 }
@@ -553,6 +579,7 @@ export async function passwordReset(prevState: any, formData: FormData) {
             { _id: resetCode.userId },
             { $set: { password: hashedPassword }, $inc: { sessionVersion: 1 } }
         );
+        await recordAuditEvent({ userId: resetCode.userId as ObjectId, action: 'auth.password_reset' });
 
         return { success: true };
 

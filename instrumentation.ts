@@ -10,10 +10,14 @@ export async function register() {
     if (process.env.NEXT_RUNTIME === 'nodejs') {
         const { IconDownloader } = await import('./lib/icon-downloader');
         const { ensureIndexes } = await import('./lib/dbIndexes');
+        const { scheduleMaintenance } = await import('./lib/maintenance');
         console.log('[Expanse] Initializing background tasks...');
 
         // Idempotent; failures are logged and never block startup.
         await ensureIndexes().catch((error) => console.error('[Expanse] Index bootstrap error:', error));
+
+        // Retention for generated PNG exports and /tmp compose work dirs.
+        scheduleMaintenance();
 
         // Only run on the main process to avoid duplicating tasks on workers
         // NEXT_MANUAL_SIGIG is often used to detect the main process in dev

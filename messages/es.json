@@ -101,7 +101,11 @@
     "unexpectedBackupError": "Ocurrió un error inesperado durante la copia de seguridad",
     "remoteNodeAdded": "Nodo remoto {host} añadido",
     "failedToAddRemoteNode": "Error al añadir nodo remoto",
-    "pleaseEnterHostAddress": "Introduce la dirección del host"
+    "pleaseEnterHostAddress": "Introduce la dirección del host",
+    "signOutEverywhere": "Cerrar sesión en todos los dispositivos",
+    "signOutEverywhereDescription": "Revoca inmediatamente todas las sesiones activas, incluida esta. Tendrás que iniciar sesión de nuevo en cada dispositivo.",
+    "signedOutEverywhere": "Se revocaron todas las sesiones",
+    "signOutEverywhereFailed": "No se pudieron revocar las sesiones"
   },
   "deploy": {
     "cpu": "CPU",
