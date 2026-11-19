@@ -6,7 +6,6 @@
  * Consulta el archivo LICENSE en la raíz del proyecto.
  */
 
-import { createHash } from 'crypto';
 import sharp from 'sharp';
 import path from 'path';
 
@@ -108,62 +107,4 @@ export async function processAndSaveClientExport(
     buffer = await removeYellowBackground(buffer) as any;
 
     return buffer;
-}
-
-/**
- * Export playground and save to file with checksum-based naming
- * @param composeId - The ID of the compose to export
- * @returns File path where the PNG was saved
- */
-export async function exportPlaygroundAsPNGToFile(
-    composeId: string
-): Promise<string> {
-    const fs = await import('fs').then(m => m.promises);
-    const path = await import('path');
-    const mongodb = await import('@/lib/mongodb');
-    const client = await mongodb.getMongoClient();
-
-    try {
-        const db = client.db(mongodb.DB_NAME);
-        const collection = db.collection('composes');
-        const { ObjectId } = await import('bson');
-
-        const compose = await collection.findOne({
-            _id: new ObjectId(composeId)
-        });
-
-        if (!compose) {
-            throw new Error('Compose not found');
-        }
-
-        // Create checksum from compose data and metadata
-        const dataString = JSON.stringify(compose.data) + JSON.stringify(compose.metadata);
-        const checksum = createHash('sha256').update(dataString).digest('hex').substring(0, 16);
-
-        // Create exports directory if it doesn't exist
-        const exportsDir = path.join(process.cwd(), 'public', 'exports');
-        await fs.mkdir(exportsDir, { recursive: true });
-
-        // Generate filename based on checksum
-        const filename = `playground-${checksum}.png`;
-        const filepath = path.join(exportsDir, filename);
-
-        console.log(filepath);
-
-        // Check if file already exists - if so, return it without regenerating
-        try {
-            await fs.access(filepath);
-            console.log(`Export file already exists: ${filename}`);
-            return `/exports/${filename}`;
-        } catch {
-            // File doesn't exist, proceed with generation
-        }
-
-        // With Puppeteer removed, we can no longer generate images on the fly on the server.
-        // Images must be provided by the client during save.
-        throw new Error('Image not found in cache and server-side generation is disabled.');
-    } catch (error) {
-        console.error('Error saving PNG to file:', error);
-        throw error;
-    }
 }

@@ -6,6 +6,38 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — Security & compatibility maintenance
 
+### Stability & performance (P1 cycle)
+
+- **Optimistic concurrency on save:** `registerCompose` accepts the
+  `updatedAt` the client read and returns `409`/`SAVE_CONFLICT` instead of
+  silently overwriting another tab. The playground shows `Unsaved / Saving /
+  Saved HH:MM`.
+- **Reliable close save:** `beforeunload` uses `navigator.sendBeacon` against
+  `POST /api/compose/save` (cookie-authenticated) instead of an async Server
+  Action that the browser can cancel.
+- **Mongo fail-fast:** `serverSelectionTimeoutMS`/`connectTimeoutMS` set to 5 s
+  and `socketTimeoutMS` to 60 s. New `GET /api/ready` checks MongoDB and the
+  Docker daemon; the compose healthcheck uses it.
+- **Deploy lock:** `runCompose`/`restartCompose` reject a second concurrent
+  operation on the same project (`DEPLOY_IN_PROGRESS`).
+- **Docker timeouts per operation:** quick calls default to 60 s, status/logs/
+  stats/config to 15 s, and compose up/down keep the long 30 min budget (the
+  `timeout: undefined` override that disabled the default is fixed).
+- **Polling:** pause when the tab is hidden, 5 s while executing / 20 s idle,
+  and derive `isExecuting` from Docker (crashed stacks no longer stay in
+  “Stop” mode). `ProjectMonitor` only polls running projects.
+- **Port validation:** parses `IP:host:container`, `/udp` and object ports,
+  keeps a reservation set across services and no longer returns duplicate
+  host ports. New `lib/ports.ts` + tests.
+- **Root layout:** a single `<html>/<body>` in `app/[locale]/layout.tsx`
+  (next-intl pattern); removed the nested document and unused Geist fonts.
+- Removed the unreachable `playground/export-render` route, `lib/exportToken`,
+  the duplicate `actions/exportActions.ts`, unused `searchDockerHub` and
+  `exportPlaygroundAsPNGToFile`.
+- UI stubs (Google Drive, remote Docker nodes) are disabled and labelled
+  “Coming soon”; sharing warns that the public YAML contains environment
+  variables. Added `aria-label` to icon-only controls.
+
 ### Security (P0 cycle)
 
 - Added per-resource authorization: every Docker action now loads the compose

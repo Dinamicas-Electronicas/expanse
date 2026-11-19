@@ -75,7 +75,7 @@ registro como línea base de auditoría; los siguientes quedan **cerrados**:
 ```text
 pnpm typecheck   ✅
 pnpm lint        ✅ 0 errores (3 warnings preexistentes)
-pnpm test        ✅ 18 archivos, 110 tests OK, 2 skipped
+pnpm test        ✅ 19 archivos, 116 tests OK, 2 skipped
 pnpm build       ✅ standalone
 HA + docker compose config --quiet  ✅ (test de integración)
 pnpm audit       ✅ 0 advisories
@@ -90,6 +90,32 @@ Quedan abiertos los bloques **P1** (concurrencia de guardado, timeouts Mongo, po
 i18n/accesibilidad, stubs, layout raíz) y **P2** (MFA, shares firmados, audit log, límites,
 socket proxy).
 
+### 1.2 Implementado en el ciclo 4 (bloque P1)
+
+| Área | Hallazgos | Implementación |
+|---|---|---|
+| Guardado | STB-13 | Control de versión optimista (`SAVE_CONFLICT`), `lastSavedAt` en el store, indicador Guardado/Sin guardar y `sendBeacon` a `POST /api/compose/save`. |
+| Mongo/observabilidad | STB-14, STB-19 | Timeouts de 5 s/60 s, `GET /api/ready` (Mongo + Docker) usado por el healthcheck; logs de errores acotados. |
+| Concurrencia de deploy | STB-16 | Lock en memoria por `composeId`; Run/Restart devuelven `DEPLOY_IN_PROGRESS`. |
+| Timeouts Docker | STB-17 | 60 s para operaciones rápidas, 15 s para `ps/logs/stats/config`, 30 min para `up/down`. Corregido el override que desactivaba el default. |
+| Polling | FUNC-05, STB-18 | Pausa con pestaña oculta, 5 s/20 s según estado y `isExecuting` derivado de Docker. |
+| Puertos | FUNC-04 | `lib/ports.ts`: `IP:host:container`, protocolos y puertos objeto; reservas compartidas y sin duplicados. |
+| Layout | ARC-01 | Un único `<html>/<body>` en `[locale]/layout.tsx`; eliminados los Geist fonts no usados. |
+| Limpieza/stubs | ARC-03, UX-17 | Eliminados `export-render`, `exportToken`, duplicado de `exportActions`, `searchDockerHub`; Google Drive y nodos remotos deshabilitados; aviso al compartir; `aria-label` en controles solo-icono. |
+
+**Verificación del ciclo 4**
+
+```text
+pnpm typecheck   ✅
+pnpm lint        ✅ 0 errores (3 warnings preexistentes)
+pnpm test        ✅ 19 archivos, 116 tests OK, 2 skipped
+pnpm build       ✅ standalone
+```
+
+Pendiente de P1: i18n completa, accesibilidad axe/contraste, reconexión automática de
+servicios al proxy HA y pruebas E2E. P2 sigue intacto (MFA, shares firmados, audit log,
+límites de recursos, socket proxy).
+
 ---
 
 ## 2. Alcance, método y estado
@@ -99,7 +125,7 @@ socket proxy).
 ```bash
 pnpm typecheck          # OK (0 errores)
 pnpm lint               # OK (0 errores, 3 warnings de react-refresh)
-pnpm test               # 18 archivos, 110 tests OK, 2 skipped
+pnpm test               # 19 archivos, 116 tests OK, 2 skipped
 pnpm audit --audit-level=high  # 0 advisories
 ```
 

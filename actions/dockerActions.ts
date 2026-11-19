@@ -18,6 +18,7 @@ import { randomBytes } from 'node:crypto';
 import YAML from 'yaml';
 import { ActionError, assertManagedProject, requireAdmin, requireCompose, requireUser } from "@/lib/authorization";
 import { validateComposePolicy } from "@/lib/composePolicy";
+import { formatPort, parsePortEntry } from "@/lib/ports";
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
 import { composeMetadata, generateHACompose, generateAllHAConfigs } from "@/lib/metadata";
@@ -36,6 +37,14 @@ import {
 } from '@/lib/dockerExec';
 
 const execAsync = promisify(exec);
+
+export type ComposeActionResult = {
+    success: boolean;
+    message?: string;
+    error?: string;
+    code?: string;
+    collisionPort?: number;
+};
 
 function policyOptions(session?: { role: 'admin' | 'user' }) {
     const hostAccess = process.env.ALLOW_COMPOSE_HOST_ACCESS === 'true';
@@ -206,7 +215,7 @@ async function requireVolumeAccess(volumeName: string, session: Awaited<ReturnTy
     throw new ActionError('FORBIDDEN_HOST_VOLUME', 'Only Expanse volumes can be managed');
 }
 
-export async function runCompose(
+async function runComposeInternal(
     composeId: string,
     yamlContent: string,
     haConfig?: HaDeploymentConfig
@@ -277,6 +286,7 @@ export async function runCompose(
         await runComposeCli(['config', '--quiet'], {
             project: composeProjectName(id),
             yamlPath,
+            timeout: 15_000,
         });
     } catch (error: any) {
         const detail = String(error?.stderr || error?.message || 'Invalid compose file').trim().slice(0, 500);
@@ -318,6 +328,44 @@ export async function runCompose(
     }
 }
 
+const composeLocks = new Set<string>();
+
+function acquireComposeLock(id: string): (() => void) | null {
+    if (composeLocks.has(id)) return null;
+    composeLocks.add(id);
+    return () => composeLocks.delete(id);
+}
+
+export async function runCompose(
+    composeId: string,
+    yamlContent: string,
+    haConfig?: HaDeploymentConfig
+): Promise<ComposeActionResult> {
+    const id = assertComposeId(composeId);
+    const release = acquireComposeLock(id);
+    if (!release) {
+        return { success: false, code: 'DEPLOY_IN_PROGRESS', error: 'A deployment is already in progress for this project' };
+    }
+    try {
+        return await runComposeInternal(id, yamlContent, haConfig);
+    } finally {
+        release();
+    }
+}
+
+export async function restartCompose(composeId: string, yamlContent: string): Promise<ComposeActionResult> {
+    const id = assertComposeId(composeId);
+    const release = acquireComposeLock(id);
+    if (!release) {
+        return { success: false, code: 'DEPLOY_IN_PROGRESS', error: 'A deployment is already in progress for this project' };
+    }
+    try {
+        return await restartComposeInternal(id, yamlContent);
+    } finally {
+        release();
+    }
+}
+
 export async function stopCompose(composeId: string) {
     const session = await requireUser();
     const id = assertComposeId(composeId);
@@ -341,7 +389,7 @@ export async function stopCompose(composeId: string) {
     }
 }
 
-export async function restartCompose(composeId: string, yamlContent: string) {
+async function restartComposeInternal(composeId: string, yamlContent: string) {
     const session = await requireUser();
     const id = assertComposeId(composeId);
     const doc = await requireCompose(id, session);
@@ -395,6 +443,7 @@ export async function restartCompose(composeId: string, yamlContent: string) {
         await runComposeCli(['config', '--quiet'], {
             project: composeProjectName(id),
             yamlPath,
+            timeout: 15_000,
         });
     } catch (error: any) {
         const detail = String(error?.stderr || error?.message || 'Invalid compose file').trim().slice(0, 500);
@@ -439,6 +488,7 @@ export async function getComposeStatus(composeId: string) {
         const { stdout } = await runComposeCli(['ps', '--format', 'json'], {
             project: composeProjectName(id),
             yamlPath: fileExists ? yamlPath : undefined,
+            timeout: 15_000,
         });
         if (!stdout.trim()) return [];
 
@@ -475,6 +525,7 @@ export async function getComposeLogs(composeId: string) {
         const { stdout } = await runComposeCli(['logs', '--tail=50', '--no-color'], {
             project: composeProjectName(id),
             yamlPath: fileExists ? yamlPath : undefined,
+            timeout: 15_000,
         });
         return { success: true, logs: stdout };
     } catch (error: any) {
@@ -495,7 +546,7 @@ export async function getComposeStats(composeId: string) {
         if (!containers || containers.length === 0) return [];
 
         const ids = assertDockerIdList(containers.map((c: any) => String(c.ID ?? '')).join(' '), 'container ids');
-        const { stdout } = await runDocker(['stats', ...ids, '--no-stream', '--format', 'json']);
+        const { stdout } = await runDocker(['stats', ...ids, '--no-stream', '--format', 'json'], { timeout: 15_000 });
 
         if (!stdout.trim()) return [];
 
@@ -700,25 +751,28 @@ async function checkPort(port: number): Promise<boolean> {
     });
 }
 
-export async function getAvailablePort(preferred: number): Promise<number> {
+export async function getAvailablePort(preferred: number, unavailable: number[] = []): Promise<number> {
     await requireUser();
-    const usedDockerPorts = await getUsedDockerPorts();
+    const dockerPorts = await getUsedDockerPorts();
+    const reserved = new Set<number>([...dockerPorts, ...unavailable]);
 
-    const isPortFree = async (p: number) => {
-        if (usedDockerPorts.includes(p)) return false;
-        return await checkPort(p);
+    const isFree = async (port: number) => {
+        if (port < 1 || port > 65_535) return false;
+        if (reserved.has(port)) return false;
+        return checkPort(port);
     };
 
-    const isAvailable = await isPortFree(preferred);
-    if (isAvailable) return preferred;
+    if (await isFree(preferred)) return preferred;
 
-    // Search for a free port starting from a random ephemeral range if possible, 
-    // or just try common ranges.
-    let port = preferred + 1;
-    while (!(await isPortFree(port)) && port < preferred + 1000) {
-        port++;
+    for (let offset = 1; offset <= 1000; offset += 1) {
+        const candidate = preferred + offset;
+        if (candidate > 65_535) break;
+        if (await isFree(candidate)) return candidate;
     }
-    return port;
+
+    // No free port in the window: let Compose report the collision instead of
+    // silently returning a port that is still occupied.
+    throw new Error('No available host port found');
 }
 
 export async function stopProjectByName(projectName: string) {
@@ -899,45 +953,54 @@ export async function validateComposePorts(yamlContent: string) {
     await requireUser();
     const doc = YAML.parse(yamlContent);
     const reassignments: Record<string, { old: number, new: number }[]> = {};
-    const usedInConfig = new Set<number>();
+    const dockerPorts = await getUsedDockerPorts();
+    const reserved = new Set<number>(dockerPorts);
     let hasChanges = false;
 
     if (doc.services) {
         for (const [serviceName, service] of Object.entries<any>(doc.services)) {
-            if (service.ports) {
-                const serviceReassignments: { old: number, new: number }[] = [];
+            if (!Array.isArray(service.ports)) continue;
 
-                for (let i = 0; i < service.ports.length; i++) {
-                    const portStr = String(service.ports[i]);
-                    const match = portStr.match(/^(\d+):(\d+)$/);
-                    if (match) {
-                        const hostPort = parseInt(match[1]);
-                        const containerPort = parseInt(match[2]);
+            const serviceReassignments: { old: number, new: number }[] = [];
 
-                        // Check if this port is already used by another service in this config
-                        // OR if it's actually busy in the system
-                        let targetPort = hostPort;
-                        if (usedInConfig.has(targetPort)) {
-                            targetPort = await getAvailablePort(targetPort + 1);
-                        } else {
-                            const availablePort = await getAvailablePort(targetPort);
-                            if (availablePort !== targetPort) {
-                                targetPort = availablePort;
-                            }
+            for (let i = 0; i < service.ports.length; i++) {
+                const entry = service.ports[i];
+                const isObject = entry && typeof entry === 'object';
+                const raw = isObject
+                    ? `${entry.host_ip ? `${entry.host_ip}:` : ''}${entry.published ?? ''}:${entry.target ?? ''}${entry.protocol ? `/${entry.protocol}` : ''}`
+                    : String(entry);
+                const parsed = parsePortEntry(raw);
+                if (!parsed) continue;
+
+                const hostPort = parsed.hostPort;
+                const isFree = !reserved.has(hostPort) && await checkPort(hostPort);
+                let targetPort = hostPort;
+
+                if (!isFree) {
+                    for (let offset = 1; offset <= 1000; offset += 1) {
+                        const candidate = hostPort + offset;
+                        if (candidate > 65_535) break;
+                        if (!reserved.has(candidate) && await checkPort(candidate)) {
+                            targetPort = candidate;
+                            break;
                         }
-
-                        if (targetPort !== hostPort) {
-                            service.ports[i] = `${targetPort}:${containerPort}`;
-                            serviceReassignments.push({ old: hostPort, new: targetPort });
-                            hasChanges = true;
-                        }
-                        usedInConfig.add(targetPort);
                     }
                 }
 
-                if (serviceReassignments.length > 0) {
-                    reassignments[serviceName] = serviceReassignments;
+                if (targetPort !== hostPort) {
+                    if (isObject) {
+                        entry.published = targetPort;
+                    } else {
+                        service.ports[i] = formatPort(targetPort, parsed.containerPort, parsed.ip, parsed.protocol);
+                    }
+                    serviceReassignments.push({ old: hostPort, new: targetPort });
+                    hasChanges = true;
                 }
+                reserved.add(targetPort);
+            }
+
+            if (serviceReassignments.length > 0) {
+                reassignments[serviceName] = serviceReassignments;
             }
         }
     }
@@ -961,41 +1024,6 @@ export async function execDockerCommand(containerId: string, command: string) {
     } catch (error: any) {
         console.error('Docker Exec Error:', error);
         return { success: false, error: error.message || error.stderr || "Execution failed" };
-    }
-}
-
-export async function searchDockerHub(query: string) {
-    await requireUser();
-    if (!query || query.trim().length < 2) {
-        return { results: [], error: null };
-    }
-
-    try {
-        const encodedQuery = encodeURIComponent(query.trim());
-        const res = await fetch(
-            `https://hub.docker.com/v2/search/repositories/?query=${encodedQuery}&page_size=20`,
-            { next: { revalidate: 0 } } as RequestInit
-        );
-
-        if (!res.ok) {
-            throw new Error(`Docker Hub API error: ${res.status}`);
-        }
-
-        const data = await res.json();
-        return {
-            results: (data.results || []).map((r: any) => ({
-                name: r.repo_name || r.name,
-                description: r.short_description || r.description || "",
-                stars: r.star_count || r.stars || 0,
-                pulls: r.pull_count || r.downloads || 0,
-                official: r.official || false,
-                logo: r.logo || null,
-            })),
-            error: null
-        };
-    } catch (err: any) {
-        console.error('Docker Hub search error:', err);
-        return { results: [], error: err.message || "Search failed" };
     }
 }
 

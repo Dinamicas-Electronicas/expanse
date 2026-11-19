@@ -51,18 +51,30 @@ export default function ProjectMonitor({ project, onClose }: ProjectMonitorProps
         fetchDetail();
     }, [fetchDetail]);
 
-    // Poll for stats
+    // Poll for stats only while the project is running and the tab is visible.
     useEffect(() => {
+        const isRunning = project.status?.includes("running") || project.status?.includes("Up");
+        if (!isRunning) return;
+
+        let cancelled = false;
         const fetchStats = async () => {
-            if (project.status?.includes("running") || project.status?.includes("Up")) {
-                const s = await getComposeStats(project.id);
-                if (Array.isArray(s)) setStats(s);
-            }
+            if (typeof document !== 'undefined' && document.hidden) return;
+            const s = await getComposeStats(project.id);
+            if (!cancelled && Array.isArray(s)) setStats(s);
         };
 
         fetchStats();
-        const interval = setInterval(fetchStats, 3000);
-        return () => clearInterval(interval);
+        const interval = setInterval(fetchStats, 5000);
+        const onVisibilityChange = () => {
+            if (!document.hidden) void fetchStats();
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
     }, [project.id, project.status]);
 
     const handleReapply = () => {
@@ -90,7 +102,7 @@ export default function ProjectMonitor({ project, onClose }: ProjectMonitorProps
                         <RefreshCw className="w-3 h-3 mr-2" /> {t('reapplyLimits')}
                     </Button>
                     {onClose && (
-                        <Button onClick={onClose} variant="ghost" className="text-slate-500 hover:text-white">
+                        <Button onClick={onClose} aria-label="Close monitor" variant="ghost" className="text-slate-500 hover:text-white">
                             <X className="w-4 h-4" />
                         </Button>
                     )}

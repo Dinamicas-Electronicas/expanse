@@ -98,7 +98,7 @@ import { getComposeById, getMyInfos } from "@/actions/userActions";
 import { reHydrateComposeIds, recreatePositionMap, recreateConnectionMap } from "@/lib/metadata";
 
 export default function PlaygroundContent() {
-    const { compose, setCompose, replaceCompose, isDirty, resetCompose } = useComposeStore();
+    const { compose, setCompose, replaceCompose, isDirty, lastSavedAt, resetCompose } = useComposeStore();
     const { id: composeId } = useComposeIdStore();
     const { isExecuting, setExecuting, clearStatuses, updateStatuses, setLogs } = useExecutionStore();
     const { isLibraryOpen, setIsLibraryOpen } = useUIStore();
@@ -181,6 +181,7 @@ export default function PlaygroundContent() {
                         }
                         replaceCompose(newCompose, { disableSave: true });
                         useComposeIdStore.getState().setId(idParam);
+                        useComposeStore.getState().setLastSavedAt(loadedCompose.updatedAt ?? null);
 
                         // Restore the persisted HA choice so the next deploy does
                         // not silently disable it after a reload.
@@ -249,41 +250,52 @@ export default function PlaygroundContent() {
 
         let cancelled = false;
 
+        const applyStatuses = (statuses: any[]) => {
+            if (!statuses || statuses.length === 0) return;
+            updateStatuses(statuses);
+            const anyRunning = statuses.some((s: any) => s.State?.toLowerCase() === 'running');
+            // Derive the UI state from Docker: if every container exited or
+            // crashed, the panel must leave "executing" mode.
+            setExecuting(anyRunning);
+        };
+
         const fetchStatuses = async () => {
+            if (typeof document !== 'undefined' && document.hidden) return;
             const statuses = await getComposeStatus(composeId);
             if (cancelled) return;
-            if (statuses && statuses.length > 0) {
-                updateStatuses(statuses);
-                // If any service is running and we weren't marked as executing, auto-set it
-                const anyRunning = statuses.some((s: any) => s.State?.toLowerCase() === 'running');
-                if (anyRunning && !isExecuting) setExecuting(true);
-            }
+            applyStatuses(statuses);
         };
 
         const fetchAll = async () => {
+            if (typeof document !== 'undefined' && document.hidden) return;
             const [statuses, logsRes] = await Promise.all([
                 getComposeStatus(composeId),
                 isExecuting ? getComposeLogs(composeId) : Promise.resolve({ success: false, logs: '' })
             ]);
             if (cancelled) return;
-            if (statuses && statuses.length > 0) {
-                updateStatuses(statuses);
-                const anyRunning = statuses.some((s: any) => s.State?.toLowerCase() === 'running');
-                if (anyRunning && !isExecuting) setExecuting(true);
-            }
+            applyStatuses(statuses);
             if (logsRes.success) setLogs((logsRes as any).logs || "");
         };
 
         // Immediate first fetch
         fetchStatuses();
 
-        // Poll every 3s when executing (full fetch with logs), every 8s otherwise (status only)
-        const intervalMs = isExecuting ? 3000 : 8000;
+        // Poll every 5s while executing, every 20s while idle, and never while
+        // the tab is hidden (the callbacks also check visibility).
+        const intervalMs = isExecuting ? 5000 : 20000;
         const interval = setInterval(isExecuting ? fetchAll : fetchStatuses, intervalMs);
+
+        const onVisibilityChange = () => {
+            if (!document.hidden) {
+                void (isExecuting ? fetchAll() : fetchStatuses());
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
 
         return () => {
             cancelled = true;
             clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [composeId, isExecuting]);
@@ -585,7 +597,7 @@ export default function PlaygroundContent() {
                 </div>
 
                 <div className="flex gap-3">
-                    <Button onClick={exportPlaygroundAsPNG} variant="secondary" className="bg-white/5 hover:bg-white/10 border-white/10 text-white shadow-sm transition-all">
+                    <Button onClick={exportPlaygroundAsPNG} aria-label="Export canvas as PNG" title="Export canvas as PNG" variant="secondary" className="bg-white/5 hover:bg-white/10 border-white/10 text-white shadow-sm transition-all">
                         <Image className="w-4 h-4 text-emerald-500" />
                     </Button>
                 </div>
@@ -623,6 +635,15 @@ export default function PlaygroundContent() {
                             <div className="flex flex-col gap-3">
                                 {/* Deploy progress bar — shown during launch */}
                                 <DeployProgress phase={deployPhase} />
+
+                                <p className={cn("text-[10px] font-bold uppercase tracking-widest text-center",
+                                    isDirty ? "text-amber-400" : "text-slate-500")}>
+                                    {isDirty
+                                        ? "Unsaved changes"
+                                        : lastSavedAt
+                                            ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}`
+                                            : "Not saved yet"}
+                                </p>
 
                                 <Button
                                     onClick={isExecuting ? handleStop : handleExecute}

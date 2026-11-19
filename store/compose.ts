@@ -30,6 +30,7 @@ interface ComposeState {
     compose: Compose;
     tick: number;
     isDirty: boolean;
+    lastSavedAt: number | null;
     haConfig: DatabaseHAConfig | null;
     haEnabled: boolean;
     setCompose: (updater: (currentCompose: Compose) => void) => Promise<boolean>;
@@ -37,6 +38,7 @@ interface ComposeState {
     addServiceFromTemplate: (template: TemplateService) => Promise<void>;
     addServiceFromImage: (imageName: string) => Promise<void>;
     resetCompose: () => void;
+    setLastSavedAt: (value: number | null) => void;
     setHAConfig: (config: DatabaseHAConfig | null) => void;
     setHAEnabled: (enabled: boolean) => void;
 }
@@ -67,22 +69,23 @@ export async function save(compose: Compose, targetId?: string) {
         }
     }
 
-    const id = await registerCompose(
+    const saved = await registerCompose(
         translator.toDict(),
         extractMetadata(compose, usePositionMap.getState().positionMap),
         composeId,
-        imageBase64
+        imageBase64,
+        useComposeStore.getState().lastSavedAt ?? undefined,
     );
-    setId(id);
+    setId(saved.id);
 
-    // After successful save, mark as clean
-    useComposeStore.setState({ isDirty: false });
+    // After successful save, mark as clean and remember the version.
+    useComposeStore.setState({ isDirty: false, lastSavedAt: saved.updatedAt });
 
     // Persist ID in URL to ensure F5 doesn't lose the project
-    if (typeof window !== 'undefined' && id) {
+    if (typeof window !== 'undefined' && saved.id) {
         const url = new URL(window.location.href);
-        if (url.searchParams.get('id') !== id) {
-            url.searchParams.set('id', id);
+        if (url.searchParams.get('id') !== saved.id) {
+            url.searchParams.set('id', saved.id);
             window.history.pushState({}, '', url.toString());
         }
     }
@@ -105,19 +108,37 @@ const debouncedSave = (compose: Compose, targetId?: string) => {
             {
                 loading: 'Saving...',
                 success: "Saved",
-                error: "Error on save"
+                error: (err: any) => err?.message === 'SAVE_CONFLICT'
+                    ? 'This project changed in another tab. Reload before saving.'
+                    : 'Error on save'
             }
         );
     }, 2000);
 };
 
-// Immediate save for beforeunload - clears timeout and saves immediately
+// Immediate save for beforeunload. A Server Action cannot be awaited while the
+// page is unloading, so use a keepalive beacon to a dedicated endpoint.
 const immediateSave = (compose: Compose) => {
     if (saveTimeout) {
         clearTimeout(saveTimeout);
         saveTimeout = null;
     }
-    // Synchronous save without toast for beforeunload
+
+    const composeId = useComposeIdStore.getState().id;
+    if (!composeId) return;
+
+    const payload = JSON.stringify({
+        id: composeId,
+        compose: new Translator(compose).toDict(),
+        metadata: extractMetadata(compose, usePositionMap.getState().positionMap),
+        expectedUpdatedAt: useComposeStore.getState().lastSavedAt ?? undefined,
+    });
+
+    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        navigator.sendBeacon('/api/compose/save', new Blob([payload], { type: 'application/json' }));
+        return;
+    }
+
     save(compose).catch(err => {
         console.error("Failed to save on unload:", err);
     });
@@ -146,8 +167,10 @@ export const useComposeStore = create<ComposeState>((set, get) => {
         compose: new Compose({ name: generateRandomName() }),
         tick: 0,
         isDirty: false,
+        lastSavedAt: null,
         haConfig: null,
         haEnabled: false,
+        setLastSavedAt: (value: number | null) => set({ lastSavedAt: value }),
         setCompose: async (updater: (currentCompose: Compose) => void) => {
             const { state: disabledSave } = useDisableStateStore.getState();
             const { compose, tick } = get();
@@ -175,7 +198,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                 newCompose.name = generateRandomName();
             }
 
-            set({ compose: newCompose, tick: get().tick + 1, isDirty: !disableSave, haConfig: null, haEnabled: false });
+            set({ compose: newCompose, tick: get().tick + 1, isDirty: !disableSave, lastSavedAt: null, haConfig: null, haEnabled: false });
 
             if (!disableSave) {
                 debouncedSave(newCompose, useComposeIdStore.getState().id);
@@ -189,6 +212,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                 compose: newCompose,
                 tick: get().tick + 1,
                 isDirty: false,
+                lastSavedAt: null,
                 haConfig: null,
                 haEnabled: false
             });

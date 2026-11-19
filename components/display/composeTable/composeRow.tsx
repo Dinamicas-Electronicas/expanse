@@ -110,7 +110,10 @@ export default function ComposeRow(data: ComposeLine) {
                                     <p>Copy</p>
                                 </button>
                             </span>
-                            <p className="text-sm text-slate-600">You can share this link to anyone, they won't require any account to view this compose</p>
+                            <p className="text-sm text-slate-600">You can share this link to anyone, they won't require any account to view this compose.</p>
+                            <p className="text-xs text-amber-600 font-semibold">
+                                Warning: the public YAML includes environment variables and may contain database passwords.
+                            </p>
                         </PopoverContent>
                     </Popover>
                     {data.status && (

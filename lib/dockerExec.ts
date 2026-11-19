@@ -19,7 +19,8 @@ const OBJECT_ID_RE = /^[a-f0-9]{24}$/i;
 /** Docker accepts this subset for container / image / volume / network refs. */
 const DOCKER_REFERENCE_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.:@/-]*$/;
 
-const EXEC_OPTIONS = { maxBuffer: 10 * 1024 * 1024, timeout: 30 * 60 * 1000 };
+const EXEC_OPTIONS = { maxBuffer: 10 * 1024 * 1024, timeout: 60 * 1000 };
+const COMPOSE_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
  * Validates a Mongo ObjectId before it is used to build filesystem paths or
@@ -70,5 +71,9 @@ export async function runCompose(
     const composeArgs = ['compose'];
     if (yamlPath) composeArgs.push('-f', yamlPath);
     composeArgs.push('-p', project, ...args);
-    return execFileAsync('docker', composeArgs, { ...EXEC_OPTIONS, timeout });
+    // An explicit `timeout: undefined` must not disable the default.
+    return execFileAsync('docker', composeArgs, {
+        ...EXEC_OPTIONS,
+        timeout: timeout ?? COMPOSE_TIMEOUT_MS,
+    });
 }

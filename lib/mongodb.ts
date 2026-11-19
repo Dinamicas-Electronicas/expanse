@@ -15,7 +15,14 @@ declare global {
     var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 
-const options = {};
+const options = {
+    // Fail fast instead of leaving requests hanging for ~30 s when MongoDB is
+    // down; the UI can then show a real error or the /api/ready probe fails.
+    serverSelectionTimeoutMS: 5_000,
+    connectTimeoutMS: 5_000,
+    socketTimeoutMS: 60_000,
+    maxPoolSize: 20,
+};
 
 let clientPromise: Promise<MongoClient> | undefined;
 

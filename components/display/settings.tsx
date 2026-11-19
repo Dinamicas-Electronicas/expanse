@@ -222,7 +222,9 @@ export default function Settings({ init }: { init?: settingsInitData }) {
                                     <div className="flex items-end">
                                         <Button
                                             onClick={handleSaveRemoteNode}
-                                            className="w-full bg-blue-600 hover:bg-blue-700 font-bold flex gap-2 transition-all"
+                                            disabled
+                                            title="Coming soon"
+                                            className="w-full bg-blue-600 hover:bg-blue-700 font-bold flex gap-2 transition-all opacity-60"
                                         >
                                             <Plus className="w-4 h-4" /> Add
                                         </Button>
@@ -277,7 +279,9 @@ export default function Settings({ init }: { init?: settingsInitData }) {
                             </p>
                             <Button
                                 onClick={handleDriveBackup}
-                                className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 font-bold flex gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                                disabled
+                                title="Coming soon"
+                                className="mt-2 w-full bg-emerald-500 hover:bg-emerald-600 font-bold flex gap-2 transition-all shadow-lg shadow-emerald-500/20 opacity-60"
                             >
                                 <Cloud className="w-4 h-4" />
                                 {t('connectGoogleDrive')}

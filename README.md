@@ -302,9 +302,11 @@ auditoría de seguridad.
 | `/{locale}/share?id=<id>&name=<name>` | Visor de solo lectura de un proyecto compartido |
 | `/{locale}/terms` | Términos y condiciones |
 
-APIs principales: `GET /api/ping` (healthcheck), `GET /api/compose?id=` (descarga YAML),
-`POST /api/compose/machine` (importación autenticada por token), `GET /api/export/png?shareId=`,
-`GET /api/logos/library/[name]`, y los endpoints de OAuth/JWT bajo `/api/auth/`.
+APIs principales: `GET /api/ping` (liveness), `GET /api/ready` (Mongo + Docker),
+`GET /api/compose?id=` (descarga YAML), `POST /api/compose/machine` (importación
+autenticada por token), `POST /api/compose/save` (guardado keepalive al cerrar),
+`GET /api/export/png?shareId=`, `GET /api/logos/library/[name]`, y los endpoints de
+OAuth/JWT bajo `/api/auth/`.
 
 ---
 
@@ -460,9 +462,9 @@ Notas:
 
 ## ✅ Calidad y tests
 
-- **Vitest** con jsdom: 18 archivos y 112 casos (110 activos) que cubren validación,
+- **Vitest** con jsdom: 19 archivos y 118 casos (116 activos) que cubren validación,
   sesión, rate limit, ejecución Docker, generación de Compose/HA, plantillas, stores,
-  política de Compose, autorización de proyectos e imágenes.
+  política de Compose, autorización de proyectos, imágenes y puertos.
 - Tests de integración que renderizan cada plantilla y la validan con la CLI real de
   Compose (se omiten si Docker no está disponible).
 - CI en GitHub Actions: `lint`, `typecheck`, cabeceras de licencia, tests y `pnpm audit`.

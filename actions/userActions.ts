@@ -140,36 +140,56 @@ export async function registerUser(email: string, password: string, company: str
     }
 }
 
-export const registerCompose = async (compose: object, metadata: composeMetadata, id?: string | undefined, imageBase64?: string) => {
+export const registerCompose = async (
+    compose: object,
+    metadata: composeMetadata,
+    id?: string | undefined,
+    imageBase64?: string,
+    expectedUpdatedAt?: number,
+) => {
     const payload = await ensureAuth();
     const db = await getDb();
     const userId = new ObjectId(payload.userId as string);
     const collection = db.collection("composes");
+    const now = Date.now();
     let result = "";
+    let updatedAt = now;
+
     if (id) {
         if (!isValidObjectId(id)) {
             throw new Error("Invalid compose id");
         }
         const objectId = new ObjectId(id);
+        const filter: Record<string, unknown> = { _id: objectId, userId };
+        // Optimistic concurrency: only overwrite the version the client read.
+        if (typeof expectedUpdatedAt === 'number') {
+            filter.updatedAt = expectedUpdatedAt;
+        }
+
         const updateResult = await collection.updateOne(
-            { _id: objectId, userId: userId }, // scope to owner
-            { $set: { data: compose, metadata: metadata, updatedAt: Date.now() } }
+            filter,
+            { $set: { data: compose, metadata, updatedAt: now } }
         );
-        if (updateResult.matchedCount > 0) {
-            result = objectId.toString();
-        } else {
+
+        if (updateResult.matchedCount === 0) {
+            const exists = await collection.findOne({ _id: objectId, userId }, { projection: { _id: 1 } });
+            if (exists) {
+                throw new Error('SAVE_CONFLICT');
+            }
             throw new Error("Could not update document: not found or not owned by user.");
         }
+        result = objectId.toString();
     } else {
         const r = await collection.insertOne({
-            userId: userId,
+            userId,
             data: compose,
-            metadata: metadata,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
+            metadata,
+            createdAt: now,
+            updatedAt: now,
         });
         result = r.insertedId.toString();
     }
+
     if (result) {
         if (imageBase64) {
             try {
@@ -188,7 +208,7 @@ export const registerCompose = async (compose: object, metadata: composeMetadata
                 console.error("Failed to save client-side thumbnail:", error);
             }
         }
-        return result;
+        return { id: result, updatedAt };
     }
     throw Error("could not register");
 };

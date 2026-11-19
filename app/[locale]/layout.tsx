@@ -46,7 +46,7 @@ export default async function LocaleLayout({
     }
 
     return (
-        <html lang={locale} className={dm_sans.className}>
+        <html lang={locale} className={dm_sans.className} suppressHydrationWarning>
             <head>
                 {process.env.ENABLE_EXTERNAL_TELEMETRY === 'true' &&
                     <Script
