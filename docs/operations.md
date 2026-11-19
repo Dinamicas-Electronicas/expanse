@@ -109,4 +109,14 @@ una cuenta autenticada equivale a administrador del host. Para reducir el riesgo
 - `DISABLE_SIGNUP=true` tras crear el primer admin.
 - HTTPS + `URL=https://…`.
 - `ALLOW_HOST_PROJECT_OPS=false` y `ALLOW_COMPOSE_HOST_ACCESS=false` salvo necesidad.
-- Valora un `docker-socket-proxy` con allowlist de endpoints (P2 del SDD).
+- Usa el override incluido para pasar por un **socket proxy** en lugar de montar el socket
+  directamente en la app:
+
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.socket-proxy.yml up -d
+  ```
+
+  El proxy (`tecnativa/docker-socket-proxy`) solo expone contenedores, imágenes, redes,
+  volúmenes, `exec` y operaciones POST; bloquea `BUILD` y `SWARM`. Sigue siendo una consola
+  de administración: no sustituye a RBAC ni a la política de Compose.
+- Rootless/daemon aislado por tenant queda como trabajo futuro (P2 del SDD).

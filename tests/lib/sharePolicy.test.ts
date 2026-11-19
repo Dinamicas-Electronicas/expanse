@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isShareActive, shareExpiresAt, shareTtlDays } from '@/lib/sharePolicy';
+import { isShareActive, isShareProtected, shareExpiresAt, shareTtlDays } from '@/lib/sharePolicy';
 
 describe('share expiry policy', () => {
     it('creates a 30-day expiry by default', () => {
@@ -32,5 +32,11 @@ describe('share expiry policy', () => {
         expect(isShareActive({ access: 'public', expiresAt: now + 1 }, now)).toBe(true);
         expect(isShareActive({ access: 'public', expiresAt: now }, now)).toBe(false);
         expect(isShareActive({ access: 'private', expiresAt: null }, now)).toBe(false);
+    });
+
+    it('detects password-protected shares', () => {
+        expect(isShareProtected({ passwordHash: 'hash' })).toBe(true);
+        expect(isShareProtected({ passwordHash: null })).toBe(false);
+        expect(isShareProtected({})).toBe(false);
     });
 });

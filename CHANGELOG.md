@@ -13,6 +13,10 @@ project uses [Semantic Versioning](https://semver.org/).
   back to `SECRET_KEY`). The code is required by web login, the embedded
   playground login, the CLI token endpoint and `/api/auth/jwt` (via `X-OTP`).
   Password reset clears MFA to avoid permanent lockout.
+- **Password-protected shares:** sharing accepts an optional password (bcrypt).
+  Visitors unlock it from the share page; a signed 1-hour cookie is verified by
+  the share loader, `/api/compose` and `/api/export/png`. Password hashes are
+  never returned by `getAllMyShares`.
 - **Audit log:** sensitive operations (login, register, password reset, account
   deletion, deploy/stop/restart, project/container/volume removal, terminal
   execution, HA failover/backup/restore, share creation) are appended to
@@ -35,6 +39,8 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Operations runbook:** new `docs/operations.md` with `mongodump`/`mongorestore`,
   retention, migrations (`email` lowercase, `sessionVersion`, legacy shares), secret
   rotation and incident response.
+- **Socket proxy example:** `docker-compose.socket-proxy.yml` runs Docker through
+  `tecnativa/docker-socket-proxy` (no direct socket mount in the app).
 - **Email migration:** `pnpm migrate:emails` normalizes legacy `users.email` values
   (dry-run by default, refuses collisions before writing).
 

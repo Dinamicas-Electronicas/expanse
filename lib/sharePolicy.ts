@@ -27,3 +27,7 @@ export function isShareActive(
     if (typeof share.expiresAt === 'number' && share.expiresAt <= now) return false;
     return true;
 }
+
+export function isShareProtected(share: { passwordHash?: string | null } | null | undefined): boolean {
+    return typeof share?.passwordHash === 'string' && share.passwordHash.length > 0;
+}

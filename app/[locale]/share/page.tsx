@@ -7,6 +7,8 @@
  */
 
 import AsyncReadOnlyPlayground from "@/components/playground/asyncReadonlyPlayground";
+import SharePasswordForm from "@/components/playground/sharePasswordForm";
+import { getShareAccessState } from "@/actions/composeActions";
 import { Suspense } from "react";
 import { Link } from "@/i18n/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,6 +20,8 @@ export default async function Page({ searchParams }: { searchParams: SP }) {
     const sp = await searchParams
     const id = sp.id
     const name = sp.name
+    const shareId = id?.toString() || ""
+    const access = shareId ? await getShareAccessState(shareId) : { status: 'missing' as const }
 
     return (
         <section className="flex h-full flex-grow justify-center items-center">
@@ -29,11 +33,15 @@ export default async function Page({ searchParams }: { searchParams: SP }) {
                         </p>}
                     <p className='text-lg'>Created with <Link className="underline font-bold" href={"/"}>Expanse ❤️</Link></p>
                 </span>
-                <Suspense fallback={<Skeleton className="shadow flex mx-10 h-4/5 rounded-xl justify-center items-center" > Loading</Skeleton>}>
-                    <AsyncReadOnlyPlayground shareId={id?.toString() || ""} options={{
-                        className: "shadow flex mx-10 h-4/5 rounded-xl border-2 border-slate-100"
-                    }} />
-                </Suspense>
+                {access.status === 'locked' ? (
+                    <SharePasswordForm shareId={shareId} />
+                ) : (
+                    <Suspense fallback={<Skeleton className="shadow flex mx-10 h-4/5 rounded-xl justify-center items-center" > Loading</Skeleton>}>
+                        <AsyncReadOnlyPlayground shareId={shareId} options={{
+                            className: "shadow flex mx-10 h-4/5 rounded-xl border-2 border-slate-100"
+                        }} />
+                    </Suspense>
+                )}
             </div>
         </section>
     )

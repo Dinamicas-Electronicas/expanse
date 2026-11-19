@@ -240,5 +240,13 @@
     "section7Title": "7. Código Fuente",
     "section7P1": "El código fuente completo de Expanse está disponible públicamente. Puedes revisarlo, bifurcarlo y contribuir al proyecto en {githubLink}.",
     "footer": "Expanse — Licencia MIT — 2025"
+  },
+  "share": {
+    "protectedTitle": "Este proyecto está protegido",
+    "protectedDescription": "Introduce la contraseña para ver el diagrama compartido.",
+    "password": "Contraseña",
+    "unlock": "Ver proyecto",
+    "unlocking": "Comprobando...",
+    "invalidPassword": "Contraseña incorrecta"
   }
 }

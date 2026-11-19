@@ -240,5 +240,13 @@
     "section7Title": "7. Source Code",
     "section7P1": "The complete source code for Expanse is publicly available. You can review, fork, and contribute to the project at {githubLink}.",
     "footer": "Expanse — MIT License — 2025"
+  },
+  "share": {
+    "protectedTitle": "This project is protected",
+    "protectedDescription": "Enter the password to view the shared compose diagram.",
+    "password": "Password",
+    "unlock": "View project",
+    "unlocking": "Checking...",
+    "invalidPassword": "Invalid password"
   }
 }

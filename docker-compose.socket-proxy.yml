@@ -1,0 +1,43 @@
+# Expanse — IDE visual de Docker Compose
+# Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+# Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+# Consulta el archivo LICENSE en la raíz del proyecto.
+#
+# Optional override: expose Docker through a filtered socket proxy instead of
+# mounting /var/run/docker.sock directly in the app container.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.socket-proxy.yml up -d
+#
+# The proxy still needs broad access for `docker compose up/down`, logs, stats
+# and the terminal (EXEC). Keep the Compose policy and RBAC enabled.
+
+services:
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      NETWORKS: 1
+      VOLUMES: 1
+      EXEC: 1
+      POST: 1
+      SYSTEM: 1
+      INFO: 1
+      BUILD: 0
+      SWARM: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - expanse-net
+
+  app:
+    environment:
+      DOCKER_HOST: tcp://socket-proxy:2375
+    depends_on:
+      socket-proxy:
+        condition: service_started
+    # Keep the library and export volume, but drop the direct socket mount.
+    volumes: !reset
+      - ./data/library:/app/data/library:ro
+      - expanse_exports:/app/public/exports

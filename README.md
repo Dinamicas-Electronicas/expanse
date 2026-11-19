@@ -472,9 +472,10 @@ Notas:
 
 ## ✅ Calidad y tests
 
-- **Vitest** con jsdom: 22 archivos y 129 casos (127 activos) que cubren validación,
+- **Vitest** con jsdom: 23 archivos y 133 casos (131 activos) que cubren validación,
   sesión, rate limit, ejecución Docker, generación de Compose/HA, plantillas, stores,
-  política de Compose, autorización, imágenes, puertos, shares, límites y MFA/TOTP.
+  política de Compose, autorización, imágenes, puertos, shares, límites, MFA/TOTP y
+  tokens de desbloqueo de shares.
 - Tests de integración que renderizan cada plantilla y la validan con la CLI real de
   Compose (se omiten si Docker no está disponible).
 - CI en GitHub Actions: `lint`, `typecheck`, cabeceras de licencia, tests y `pnpm audit`.
@@ -496,6 +497,7 @@ una cuenta comprometida equivale a acceso al host. Antes de exponerlo a Internet
 - No publiques el puerto de MongoDB.
 - Revisa el modelo de amenazas completo en [`docs/SDD.md`](docs/SDD.md).
 - Backup, restauración, migraciones y rotación de secretos: [`docs/operations.md`](docs/operations.md).
+- Para reducir el riesgo del socket, usa `docker-compose.socket-proxy.yml` (ver runbook).
 
 Medidas implementadas:
 
@@ -505,7 +507,7 @@ Medidas implementadas:
   secretos ni contenido de comandos.
 - **Sesiones revocables:** `logoutEverywhere` invalida todos los JWT vía `sessionVersion`.
 - **MFA TOTP opcional** con secreto cifrado y verificación en web, CLI y API.
-- **Shares caducables:** los enlaces expiran según `SHARE_TTL_DAYS` (30 días por defecto).
+- **Shares caducables y protegidos:** `SHARE_TTL_DAYS` (30 días por defecto) y contraseña opcional con desbloqueo firmado de 1 hora.
 - **Propiedad por proyecto:** todas las acciones Docker cargan el Compose filtrando por
   `userId`; el `_id` de un proyecto no es una capability.
 - **Política de Compose:** se rechazan `privileged`, `cap_add`, `devices`, `pid/ipc/uts`,

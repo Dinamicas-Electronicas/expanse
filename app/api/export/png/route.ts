@@ -12,7 +12,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { getDb } from '@/lib/mongodb';
 import { ObjectId } from 'bson';
-import { isShareActive } from '@/lib/sharePolicy';
+import { isShareActive, isShareProtected } from '@/lib/sharePolicy';
+import { verifyShareAccessToken } from '@/lib/shareAccess';
 
 export async function GET(request: NextRequest) {
     try {
@@ -39,6 +40,16 @@ export async function GET(request: NextRequest) {
         // Only explicitly public, non-expired shares can be exported.
         if (!isShareActive(share as any)) {
             return NextResponse.json({ error: 'Share is not public or has expired' }, { status: 403 });
+        }
+
+        // Password-protected shares require the unlock cookie or a signed key.
+        if (isShareProtected(share as any)) {
+            const token = request.nextUrl.searchParams.get('key')
+                || request.cookies.get('share_access')?.value
+                || '';
+            if (!verifyShareAccessToken(shareId, token)) {
+                return NextResponse.json({ error: 'Share is password protected' }, { status: 403 });
+            }
         }
 
         const composeId = share.composeId;

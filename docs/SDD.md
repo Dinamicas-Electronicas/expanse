@@ -125,6 +125,8 @@ límites de recursos, socket proxy).
 | Shares | SEC-30 | Caducidad (`SHARE_TTL_DAYS`, 30 días por defecto; `0` = nunca); shares expirados rechazados en visor, `/api/compose` y `/api/export/png`; re-compartir refresca la fecha. |
 | Retención | STB-15 | Limpieza diaria de PNG exportados y `/tmp/expanse-*` según `EXPORT_RETENTION_DAYS`/`TMP_RETENTION_DAYS`. |
 | MFA | SEC-28 | TOTP (SHA-1, 30 s) con secreto cifrado AES-256-GCM (`MFA_ENCRYPTION_KEY` o `SECRET_KEY`). Exigido en login web, playground, CLI y `/api/auth/jwt` (`X-OTP`); el reset de contraseña limpia MFA. |
+| Shares con contraseña | SEC-30 | Hash bcrypt opcional por share; formulario de desbloqueo y cookie firmada de 1 h (HMAC) validada por el visor, `/api/compose` y `/api/export/png`. |
+| Socket proxy | SEC-24 | Override `docker-compose.socket-proxy.yml` con `tecnativa/docker-socket-proxy` y `DOCKER_HOST`; la app deja de montar el socket directamente. |
 | Cuotas y límites | STB-15 | `MAX_COMPOSES_PER_USER` (50), `MAX_SERVICES_PER_COMPOSE` (50), `MAX_COMPOSE_BYTES` (1 MB) y `MAX_SCREENSHOT_CHARS` (4 MB); límites de CPU/memoria para app y Mongo en compose. |
 | Operación | ARC-06 | `docs/operations.md`: backup/restore, retención, migraciones, rotación de secretos y respuesta a incidentes. |
 | Migración de emails | STB-22 | `pnpm migrate:emails` normaliza `users.email` (dry-run, rechaza colisiones). |
@@ -134,7 +136,7 @@ límites de recursos, socket proxy).
 ```text
 pnpm typecheck   ✅
 pnpm lint        ✅ 0 errores (3 warnings preexistentes)
-pnpm test        ✅ 22 archivos, 127 tests OK, 2 skipped
+pnpm test        ✅ 23 archivos, 131 tests OK, 2 skipped
 pnpm build       ✅ standalone
 ```
 
@@ -151,7 +153,7 @@ accesibilidad y E2E del bloque P1.
 ```bash
 pnpm typecheck          # OK (0 errores)
 pnpm lint               # OK (0 errores, 3 warnings de react-refresh)
-pnpm test               # 22 archivos, 127 tests OK, 2 skipped
+pnpm test               # 23 archivos, 131 tests OK, 2 skipped
 pnpm audit --audit-level=high  # 0 advisories
 ```
 

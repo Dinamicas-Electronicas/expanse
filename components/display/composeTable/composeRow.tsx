@@ -10,6 +10,7 @@
 
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -43,11 +44,12 @@ export default function ComposeRow(data: ComposeLine) {
 
     const [shareOpen, setShareOpen] = useState(false)
     const [link, setLink] = useState("")
+    const [sharePassword, setSharePassword] = useState("")
 
-    async function handleShare(composeId: string) {
+    async function handleShare(composeId: string, password?: string) {
         try {
             setShareOpen(true)
-            const res = await shareCompose(composeId)
+            const res = await shareCompose(composeId, password)
             setLink(`${res}&name=${data.name}`)
         } catch (e) {
             console.error(e)
@@ -117,6 +119,23 @@ export default function ComposeRow(data: ComposeLine) {
                             <p className="text-xs text-slate-500">
                                 Links expire automatically (30 days by default; configure SHARE_TTL_DAYS).
                             </p>
+                            <div className="flex gap-2">
+                                <Input
+                                    type="password"
+                                    value={sharePassword}
+                                    onChange={(event) => setSharePassword(event.target.value)}
+                                    placeholder="Optional password"
+                                    className="h-8 text-xs"
+                                />
+                                <Button
+                                    type="button"
+                                    className="h-8 text-xs"
+                                    onClick={() => handleShare(data.id, sharePassword)}
+                                    disabled={!sharePassword}
+                                >
+                                    Protect
+                                </Button>
+                            </div>
                         </PopoverContent>
                     </Popover>
                     {data.status && (
