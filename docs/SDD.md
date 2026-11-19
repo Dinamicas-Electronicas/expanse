@@ -140,9 +140,9 @@ pnpm test        ✅ 23 archivos, 131 tests OK, 2 skipped
 pnpm build       ✅ standalone
 ```
 
-Pendiente de P2: MFA, protección de shares con contraseña/firma, límites de recursos por
-usuario, socket proxy/rootless y migraciones de esquema. También quedan i18n completa,
-accesibilidad y E2E del bloque P1.
+P2 queda cerrado salvo **rootless/daemon aislado por tenant**. Ya están MFA, shares con
+contraseña y token HMAC, socket proxy, cuotas/límites y migración de emails. Del P1 quedan
+i18n completa, auditoría axe/contraste, reconexión automática de servicios al proxy HA y E2E.
 
 ---
 
