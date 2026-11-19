@@ -36,6 +36,7 @@ export default function EmbedSignin({ redirectToPlayGround = false }: { redirect
 
     const [password, setPassword] = useState("")
     const [email, setEmail] = useState("")
+    const [otp, setOtp] = useState("")
     const [termsAccepted, setTermsAccepted] = useState(false)
 
     const getPlaygroundData = () => {
@@ -81,6 +82,7 @@ export default function EmbedSignin({ redirectToPlayGround = false }: { redirect
         const formData = new FormData()
         formData.append("email", email)
         formData.append("password", password)
+        if (otp) formData.append("otp", otp)
         formData.append("data", data)
 
         toast.promise(
@@ -123,6 +125,12 @@ export default function EmbedSignin({ redirectToPlayGround = false }: { redirect
                     <Label htmlFor="password">{t('password')}</Label>
                     <Input id="password" required name="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
+                {mode === "login" && (
+                    <div className="flex flex-col gap-2">
+                        <Label htmlFor="otp">Authentication code (if MFA is enabled)</Label>
+                        <Input id="otp" name="otp" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" value={otp} onChange={(e) => setOtp(e.target.value)} />
+                    </div>
+                )}
                 {mode === "register" && (
                     <div className="flex flex-row items-center gap-3">
                         <Checkbox

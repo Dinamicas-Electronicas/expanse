@@ -8,6 +8,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Security & operations (P2 cycle)
 
+- **MFA (TOTP):** users can enable a second factor from Settings → Account.
+  Secrets are encrypted at rest with AES-256-GCM (`MFA_ENCRYPTION_KEY`, falling
+  back to `SECRET_KEY`). The code is required by web login, the embedded
+  playground login, the CLI token endpoint and `/api/auth/jwt` (via `X-OTP`).
+  Password reset clears MFA to avoid permanent lockout.
 - **Audit log:** sensitive operations (login, register, password reset, account
   deletion, deploy/stop/restart, project/container/volume removal, terminal
   execution, HA failover/backup/restore, share creation) are appended to

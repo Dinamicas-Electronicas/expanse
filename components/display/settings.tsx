@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTrigger } from "@/components/ui/dialog";
-import { deleteUser, logoutEverywhere } from "@/actions/userActions";
+import { deleteUser, disableMfa, confirmMfa, logoutEverywhere, setupMfa } from "@/actions/userActions";
 import { exportAllProjects, exportToGoogleDrive } from "@/actions/backupActions";
 import { getLocalSystemInfo, saveRemoteNodeConfig } from "@/actions/systemActions";
 import toast from "react-hot-toast";
@@ -24,6 +24,7 @@ import { useTranslations } from "next-intl";
 
 interface settingsInitData {
     email: string
+    mfaEnabled?: boolean
 }
 
 interface SystemInfo {
@@ -38,6 +39,10 @@ export default function Settings({ init }: { init?: settingsInitData }) {
     const [email,] = useState(init?.email)
     const [confirm, setConfirm] = useState("")
     const [deletePassword, setDeletePassword] = useState("")
+    const [mfaEnabled, setMfaEnabled] = useState(init?.mfaEnabled === true)
+    const [mfaSetup, setMfaSetup] = useState<{ secret: string; otpauth: string } | null>(null)
+    const [mfaCode, setMfaCode] = useState("")
+    const [mfaPassword, setMfaPassword] = useState("")
     const [isExporting, setIsExporting] = useState(false)
     const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
 
@@ -79,6 +84,39 @@ export default function Settings({ init }: { init?: settingsInitData }) {
         } catch (e) {
             toast.error(t('signOutEverywhereFailed'))
             console.error(e)
+        }
+    }
+
+    async function handleStartMfa() {
+        try {
+            const res = await setupMfa()
+            setMfaSetup(res)
+        } catch (e: any) {
+            toast.error(e.message || t('mfaError'))
+        }
+    }
+
+    async function handleConfirmMfa() {
+        try {
+            await confirmMfa(mfaCode)
+            setMfaEnabled(true)
+            setMfaSetup(null)
+            setMfaCode("")
+            toast.success(t('mfaEnabledSuccess'))
+        } catch (e: any) {
+            toast.error(e.message || t('mfaError'))
+        }
+    }
+
+    async function handleDisableMfa() {
+        try {
+            await disableMfa(mfaPassword, mfaCode)
+            setMfaEnabled(false)
+            setMfaPassword("")
+            setMfaCode("")
+            toast.success(t('mfaDisabledSuccess'))
+        } catch (e: any) {
+            toast.error(e.message || t('mfaError'))
         }
     }
 
@@ -313,6 +351,66 @@ export default function Settings({ init }: { init?: settingsInitData }) {
                 </TabsContent>
 
                 <TabsContent value="security" className="mt-6 animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="bg-slate-900/40 border border-white/10 rounded-2xl p-8 shadow-xl mb-6">
+                        <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
+                            <ShieldAlert className="w-5 h-5 text-emerald-400" />
+                            {t('mfaTitle')}
+                        </h3>
+                        <p className="text-slate-400 text-sm mb-4 leading-relaxed">
+                            {mfaEnabled ? t('mfaEnabledDescription') : t('mfaDisabledDescription')}
+                        </p>
+
+                        {!mfaEnabled && !mfaSetup && (
+                            <Button onClick={handleStartMfa} className="bg-emerald-600 hover:bg-emerald-700 font-bold">
+                                {t('mfaEnable')}
+                            </Button>
+                        )}
+
+                        {!mfaEnabled && mfaSetup && (
+                            <div className="flex flex-col gap-3">
+                                <p className="text-xs text-slate-400">{t('mfaSecretHint')}</p>
+                                <code className="rounded-lg bg-black/40 border border-white/10 p-3 text-sm text-emerald-300 break-all">
+                                    {mfaSetup.secret}
+                                </code>
+                                <p className="text-xs text-slate-500 break-all">{mfaSetup.otpauth}</p>
+                                <Input
+                                    value={mfaCode}
+                                    onChange={(e) => setMfaCode(e.target.value)}
+                                    inputMode="numeric"
+                                    autoComplete="one-time-code"
+                                    placeholder={t('mfaCode')}
+                                    className="bg-white/5 border-white/10 text-white"
+                                />
+                                <Button onClick={handleConfirmMfa} className="bg-emerald-600 hover:bg-emerald-700 font-bold">
+                                    {t('mfaConfirm')}
+                                </Button>
+                            </div>
+                        )}
+
+                        {mfaEnabled && (
+                            <div className="flex flex-col gap-3 max-w-sm">
+                                <Input
+                                    type="password"
+                                    value={mfaPassword}
+                                    onChange={(e) => setMfaPassword(e.target.value)}
+                                    placeholder={t('mfaPassword')}
+                                    className="bg-white/5 border-white/10 text-white"
+                                />
+                                <Input
+                                    value={mfaCode}
+                                    onChange={(e) => setMfaCode(e.target.value)}
+                                    inputMode="numeric"
+                                    autoComplete="one-time-code"
+                                    placeholder={t('mfaCode')}
+                                    className="bg-white/5 border-white/10 text-white"
+                                />
+                                <Button onClick={handleDisableMfa} variant="destructive" className="bg-rose-600 hover:bg-rose-700 font-bold">
+                                    {t('mfaDisable')}
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="bg-slate-900/40 border border-white/10 rounded-2xl p-8 shadow-xl mb-6">
                         <h3 className="text-xl font-bold text-white mb-3 flex items-center gap-2">
                             <ShieldAlert className="w-5 h-5 text-amber-400" />

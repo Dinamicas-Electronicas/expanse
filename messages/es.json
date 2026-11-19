@@ -105,7 +105,19 @@
     "signOutEverywhere": "Cerrar sesión en todos los dispositivos",
     "signOutEverywhereDescription": "Revoca inmediatamente todas las sesiones activas, incluida esta. Tendrás que iniciar sesión de nuevo en cada dispositivo.",
     "signedOutEverywhere": "Se revocaron todas las sesiones",
-    "signOutEverywhereFailed": "No se pudieron revocar las sesiones"
+    "signOutEverywhereFailed": "No se pudieron revocar las sesiones",
+    "mfaTitle": "Autenticación en dos pasos",
+    "mfaEnabledDescription": "MFA está activo. Para iniciar sesión necesitas un código de tu aplicación autenticadora.",
+    "mfaDisabledDescription": "Añade un segundo factor (TOTP) para proteger la cuenta aunque la contraseña se filtre.",
+    "mfaEnable": "Activar MFA",
+    "mfaSecretHint": "Añade este secreto a tu aplicación autenticadora y escribe el código de 6 dígitos:",
+    "mfaConfirm": "Confirmar y activar",
+    "mfaDisable": "Desactivar MFA",
+    "mfaCode": "Código de 6 dígitos",
+    "mfaPassword": "Contraseña de la cuenta",
+    "mfaEnabledSuccess": "MFA activado",
+    "mfaDisabledSuccess": "MFA desactivado",
+    "mfaError": "No se pudo actualizar MFA"
   },
   "deploy": {
     "cpu": "CPU",

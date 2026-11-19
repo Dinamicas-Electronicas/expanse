@@ -105,7 +105,19 @@
     "signOutEverywhere": "Sign out of all devices",
     "signOutEverywhereDescription": "Immediately revoke every active session, including this one. You will need to sign in again on every device.",
     "signedOutEverywhere": "All sessions have been revoked",
-    "signOutEverywhereFailed": "Could not revoke the sessions"
+    "signOutEverywhereFailed": "Could not revoke the sessions",
+    "mfaTitle": "Two-factor authentication",
+    "mfaEnabledDescription": "MFA is enabled. A code from your authenticator app is required to sign in.",
+    "mfaDisabledDescription": "Add a second factor (TOTP) to protect your account even if the password leaks.",
+    "mfaEnable": "Enable MFA",
+    "mfaSecretHint": "Add this secret to your authenticator app, then enter the 6-digit code:",
+    "mfaConfirm": "Confirm and enable",
+    "mfaDisable": "Disable MFA",
+    "mfaCode": "6-digit code",
+    "mfaPassword": "Account password",
+    "mfaEnabledSuccess": "MFA enabled",
+    "mfaDisabledSuccess": "MFA disabled",
+    "mfaError": "Could not update MFA"
   },
   "deploy": {
     "cpu": "CPU",

@@ -83,7 +83,8 @@ db.shares.updateMany(
 
 | Secreto | Procedimiento |
 |---|---|
-| `SECRET_KEY` | Cámbialo y reinicia; **invalida todas las sesiones**. |
+| `SECRET_KEY` | Cámbialo y reinicia; **invalida todas las sesiones**. Si MFA usa el fallback de `SECRET_KEY`, define antes un `MFA_ENCRYPTION_KEY` estable para no invalidar los secretos TOTP. |
+| `MFA_ENCRYPTION_KEY` | No lo cambies sin desactivar MFA; si se pierde, los usuarios pueden recuperar la cuenta con «olvidé mi contraseña» (el reset limpia MFA). |
 | `GITHUB_CLIENT_SECRET` | Rótalo en GitHub y actualiza el entorno. |
 | `BREVO_API_KEY` | Rótalo en Brevo. |
 | `DB_PASS` | Cambia la contraseña en Mongo y actualiza `MONGODB_URI`/compose. |

@@ -31,9 +31,10 @@ export default function Dashboard() {
         // Access the input values by name
         const email = (form.elements.namedItem("email") as HTMLInputElement).value;
         const password = (form.elements.namedItem("password") as HTMLInputElement).value;
+        const otp = (form.elements.namedItem("otp") as HTMLInputElement)?.value || undefined;
         let token = ""
         try{
-            token = await getApiToken(email,password)
+            token = await getApiToken(email,password,otp)
         }catch(e:any){
             toast.error("bad credentials")
           console.error(e)
@@ -60,6 +61,10 @@ export default function Dashboard() {
                         <div className="flex flex-col gap-2">
                             <Label htmlFor="password">password</Label>
                             <Input required name="password" type="password"/>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <Label htmlFor="otp">2FA code (if enabled)</Label>
+                            <Input name="otp" inputMode="numeric" autoComplete="one-time-code" placeholder="123456"/>
                         </div>
                         <Button type="submit">login</Button>
                         <Separator />

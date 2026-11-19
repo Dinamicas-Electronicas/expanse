@@ -27,12 +27,27 @@ import { createUserRecord } from "@/lib/users";
 import { isValidObjectId } from "@/lib/validation";
 import { recordAuditEvent } from "@/lib/auditLog";
 import { maxComposesPerUser, maxScreenshotChars } from "@/lib/limits";
+import { decryptSecret, encryptSecret, generateTotpSecret, otpauthUrl, verifyTotp } from "@/lib/totp";
 import {
     emailSchema,
     loginCredentialsSchema,
     registrationSchema,
     zodErrorMessage,
 } from "@/lib/validation";
+
+/**
+ * Verifies a TOTP code when the account has MFA enabled. Accounts without MFA
+ * always pass, so callers can apply it unconditionally after the password.
+ */
+function verifyUserMfa(user: any, otp: string | undefined): boolean {
+    if (!user?.mfaEnabled) return true;
+    if (!user?.mfaSecret) return false;
+    try {
+        return verifyTotp(decryptSecret(user.mfaSecret), String(otp ?? ''));
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Password login only.
@@ -66,6 +81,9 @@ export async function createOrLoginUser(email: string, data: any): Promise<strin
     const passwordMatch = await bcrypt.compare(password, userExist.password);
     if (!passwordMatch) {
         throw new Error("Invalid email or password");
+    }
+    if (!verifyUserMfa(userExist, typeof data?.otp === 'string' ? data.otp : undefined)) {
+        throw new Error("Invalid authentication code");
     }
 
     await setSessionCookie(await createSessionToken(
@@ -259,13 +277,15 @@ export async function loginUser(prevState: any, formData: FormData) {
     const loginSchema = zfd.formData({
         email: emailSchema,
         password: z.string().min(1).max(200),
+        otp: z.string().optional(),
         data: z.string().optional()
     });
 
     try {
-        const { email, password, data } = loginSchema.parse({
+        const { email, password, otp, data } = loginSchema.parse({
             email: formData.get('email'),
             password: formData.get('password'),
+            otp: formData.get('otp') || undefined,
             data: formData.get('data') || undefined
         });
 
@@ -282,6 +302,10 @@ export async function loginUser(prevState: any, formData: FormData) {
 
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) throw new Error("Invalid email or password");
+
+        if (!verifyUserMfa(user, otp)) {
+            return { error: user.mfaEnabled ? 'Invalid authentication code' : 'Invalid email or password' };
+        }
 
         await setSessionCookie(await createSessionToken(
             user._id.toString(),
@@ -305,7 +329,7 @@ export async function loginUser(prevState: any, formData: FormData) {
     }
 }
 
-export async function getApiToken(email: string, password: string): Promise<string> {
+export async function getApiToken(email: string, password: string, otp?: string): Promise<string> {
     const credentials = loginCredentialsSchema.parse({ email, password });
 
     const limit = rateLimit(`${await clientKey('api-token')}:${credentials.email}`, 10, 10 * 60 * 1000);
@@ -321,6 +345,7 @@ export async function getApiToken(email: string, password: string): Promise<stri
 
     const passwordMatch = await bcrypt.compare(credentials.password, user.password);
     if (!passwordMatch) throw new Error("Invalid email or password");
+    if (!verifyUserMfa(user, otp)) throw new Error("Invalid authentication code");
 
     return createSessionToken(user._id.toString(), user.email, Number(user.sessionVersion ?? 0));
 }
@@ -398,9 +423,9 @@ export const getMyInfos = async () => {
     const userId = new ObjectId(payload.userId as string);
 
     try {
-        const user = await collection.findOne({ _id: userId }, { projection: { email: 1 } });
+        const user = await collection.findOne({ _id: userId }, { projection: { email: 1, mfaEnabled: 1 } });
         if (!user) return undefined;
-        return { email: user.email };
+        return { email: user.email, mfaEnabled: user.mfaEnabled === true };
     } catch (error) {
         console.error(error);
         throw new Error("Failed to fetch user info");
@@ -469,6 +494,87 @@ export const logoutEverywhere = async () => {
     await recordAuditEvent({ userId, action: 'auth.logout_all' });
     return { success: true };
 };
+
+/** Generates a pending TOTP secret and its otpauth URL. */
+export async function setupMfa(): Promise<{ secret: string; otpauth: string }> {
+    const payload = await ensureAuth();
+    const db = await getDb();
+    const users = db.collection("users");
+    const userId = new ObjectId(payload.userId as string);
+    const user = await users.findOne({ _id: userId }, { projection: { email: 1, mfaEnabled: 1 } });
+
+    if (!user) throw new Error("Account not found");
+    if (user.mfaEnabled) throw new Error("MFA is already enabled");
+
+    const secret = generateTotpSecret();
+    await users.updateOne({ _id: userId }, { $set: { mfaPendingSecret: encryptSecret(secret) } });
+
+    return { secret, otpauth: otpauthUrl(secret, String(user.email ?? '')) };
+}
+
+/** Confirms a pending setup with a valid TOTP code and enables MFA. */
+export async function confirmMfa(code: string): Promise<{ success: true }> {
+    const payload = await ensureAuth();
+    const db = await getDb();
+    const users = db.collection("users");
+    const userId = new ObjectId(payload.userId as string);
+    const user = await users.findOne({ _id: userId }, { projection: { mfaPendingSecret: 1 } });
+
+    if (!user?.mfaPendingSecret) throw new Error("Start the MFA setup first");
+
+    let secret: string;
+    try {
+        secret = decryptSecret(user.mfaPendingSecret);
+    } catch {
+        throw new Error("Invalid MFA setup");
+    }
+
+    if (!verifyTotp(secret, code)) throw new Error("Invalid authentication code");
+
+    await users.updateOne(
+        { _id: userId },
+        {
+            $set: { mfaSecret: user.mfaPendingSecret, mfaEnabled: true },
+            $unset: { mfaPendingSecret: "" },
+        },
+    );
+    await recordAuditEvent({ userId, action: 'auth.mfa_enable' });
+    return { success: true };
+}
+
+/** Disables MFA after re-authenticating with the password and a current code. */
+export async function disableMfa(password: string, code?: string): Promise<{ success: true }> {
+    const payload = await ensureAuth();
+    const db = await getDb();
+    const users = db.collection("users");
+    const userId = new ObjectId(payload.userId as string);
+    const user = await users.findOne({ _id: userId });
+
+    if (!user) throw new Error("Account not found");
+    if (user.password) {
+        if (!password || !(await bcrypt.compare(password, user.password))) {
+            throw new Error("Invalid password");
+        }
+    }
+    if (user.mfaEnabled) {
+        let secret = '';
+        try {
+            secret = decryptSecret(user.mfaSecret);
+        } catch {
+            throw new Error("Invalid MFA setup");
+        }
+        if (!verifyTotp(secret, String(code ?? ''))) {
+            throw new Error("Invalid authentication code");
+        }
+    }
+
+    await users.updateOne(
+        { _id: userId },
+        { $unset: { mfaSecret: "", mfaPendingSecret: "", mfaEnabled: "" } },
+    );
+    await recordAuditEvent({ userId, action: 'auth.mfa_disable' });
+    return { success: true };
+}
 
 export const deleteCompose = async (composeId: string) => {
     const payload = await ensureAuth();
@@ -588,7 +694,14 @@ export async function passwordReset(prevState: any, formData: FormData) {
         const hashedPassword = await bcrypt.hash(password, 12);
         await user_collec.updateOne(
             { _id: resetCode.userId },
-            { $set: { password: hashedPassword }, $inc: { sessionVersion: 1 } }
+            {
+                $set: { password: hashedPassword },
+                $inc: { sessionVersion: 1 },
+                // Email-based recovery is the last resort: clear MFA so a
+                // rotated encryption key or a lost authenticator cannot lock
+                // the account permanently.
+                $unset: { mfaSecret: "", mfaPendingSecret: "", mfaEnabled: "" },
+            }
         );
         await recordAuditEvent({ userId: resetCode.userId as ObjectId, action: 'auth.password_reset' });
 

@@ -253,6 +253,7 @@ allá de `docker compose`).
 | `MAX_SERVICES_PER_COMPOSE` | No | Máximo de servicios por Compose. Por defecto 50. |
 | `APP_CPUS` / `APP_MEM_LIMIT` | No | Límites del contenedor de la app (`2.0` / `2g`). |
 | `DB_CPUS` / `DB_MEM_LIMIT` | No | Límites del MongoDB del stack (`1.0` / `1g`). |
+| `MFA_ENCRYPTION_KEY` | No | Clave para cifrar secretos TOTP; si falta se usa `SECRET_KEY`. Mantenla estable al rotar `SECRET_KEY`. |
 
 > **Roles:** el primer usuario creado es `admin`. Las operaciones de host (borrar
 > contenedores/volúmenes ajenos, ejecutar comandos, gestionar proyectos que no empiezan por
@@ -471,9 +472,9 @@ Notas:
 
 ## ✅ Calidad y tests
 
-- **Vitest** con jsdom: 21 archivos y 123 casos (121 activos) que cubren validación,
+- **Vitest** con jsdom: 22 archivos y 129 casos (127 activos) que cubren validación,
   sesión, rate limit, ejecución Docker, generación de Compose/HA, plantillas, stores,
-  política de Compose, autorización de proyectos, imágenes, puertos, shares y límites.
+  política de Compose, autorización, imágenes, puertos, shares, límites y MFA/TOTP.
 - Tests de integración que renderizan cada plantilla y la validan con la CLI real de
   Compose (se omiten si Docker no está disponible).
 - CI en GitHub Actions: `lint`, `typecheck`, cabeceras de licencia, tests y `pnpm audit`.
@@ -503,6 +504,7 @@ Medidas implementadas:
 - **Auditoría:** las operaciones sensibles se registran en `audit_log` (TTL 90 días) sin
   secretos ni contenido de comandos.
 - **Sesiones revocables:** `logoutEverywhere` invalida todos los JWT vía `sessionVersion`.
+- **MFA TOTP opcional** con secreto cifrado y verificación en web, CLI y API.
 - **Shares caducables:** los enlaces expiran según `SHARE_TTL_DAYS` (30 días por defecto).
 - **Propiedad por proyecto:** todas las acciones Docker cargan el Compose filtrando por
   `userId`; el `_id` de un proyecto no es una capability.

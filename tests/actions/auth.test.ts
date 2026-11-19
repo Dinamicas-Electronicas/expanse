@@ -8,6 +8,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import bcrypt from 'bcryptjs';
+import { encryptSecret, generateTotp, generateTotpSecret } from '@/lib/totp';
 
 const mocks = vi.hoisted(() => {
     const state: { user: any } = { user: null };
@@ -144,5 +145,25 @@ describe('createOrLoginUser (password authentication only)', () => {
     it('rejects invalid emails through schema validation', async () => {
         await expect(createOrLoginUser('not-an-email', { password: 'whatever' }))
             .rejects.toBeTruthy();
+    });
+
+    it('requires a valid TOTP code when MFA is enabled', async () => {
+        const secret = generateTotpSecret();
+        mocks.state.user = {
+            _id: '6aff149ff3ec933fa297d864',
+            email: 'mfa@example.com',
+            password: await bcrypt.hash('real-password', 4),
+            mfaEnabled: true,
+            mfaSecret: encryptSecret(secret),
+        };
+
+        await expect(
+            createOrLoginUser('mfa@example.com', { password: 'real-password' }),
+        ).rejects.toThrow('Invalid authentication code');
+
+        const code = generateTotp(secret);
+        await expect(
+            createOrLoginUser('mfa@example.com', { password: 'real-password', otp: code }),
+        ).resolves.toBe('6aff149ff3ec933fa297d864');
     });
 });

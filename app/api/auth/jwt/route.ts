@@ -14,6 +14,7 @@ import { emailSchema } from "@/lib/validation";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 import { createSessionToken } from "@/lib/session";
 import { ObjectId } from "bson";
+import { decryptSecret, verifyTotp } from "@/lib/totp";
 
 function parseBasicCredentials(header: string): { email: string; password: string } | null {
     const decoded = Buffer.from(header.substring(6), 'base64').toString('utf-8');
@@ -62,6 +63,19 @@ export async function GET(req: NextRequest) {
     const passwordMatch = await bcrypt.compare(parsed.password, user.password);
     if (!passwordMatch) {
         return NextResponse.json({ error: "Invalid email or password" }, { status: 401 })
+    }
+
+    if (user.mfaEnabled) {
+        const otp = req.headers.get('x-otp') || new URL(req.url).searchParams.get('otp') || '';
+        let secret = '';
+        try {
+            secret = decryptSecret(user.mfaSecret);
+        } catch {
+            return NextResponse.json({ error: "Invalid authentication code" }, { status: 401 });
+        }
+        if (!verifyTotp(secret, otp)) {
+            return NextResponse.json({ error: "Invalid authentication code" }, { status: 401 });
+        }
     }
 
     if (!process.env.SECRET_KEY) {

@@ -73,6 +73,10 @@ function LoginForm() {
                         <Label htmlFor="password">{t('password')}</Label>
                         <Input required name="password" type="password" />
                     </div>
+                    <div className="flex flex-col gap-2">
+                        <Label htmlFor="otp">Authentication code (if MFA is enabled)</Label>
+                        <Input name="otp" inputMode="numeric" autoComplete="one-time-code" placeholder="123456" />
+                    </div>
                     <Button type="submit">{t('login')}</Button>
                     <div className="flex flex-row gap-5">
                         <Button asChild variant="default" className="w-1/2">
