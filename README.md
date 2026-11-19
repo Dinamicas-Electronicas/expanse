@@ -10,6 +10,8 @@
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose" />
     <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
   </p>
+
+  <img src="assets/demo1.png" alt="Expanse — Editor visual de Docker Compose" width="100%" />
 </div>
 
 ---
