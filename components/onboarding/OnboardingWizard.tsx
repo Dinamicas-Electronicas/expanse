@@ -10,7 +10,7 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Rocket, Container, Globe, CheckCircle, ChevronRight, X } from "lucide-react"
+import { Rocket, Container, Globe, CheckCircle, ChevronRight } from "lucide-react"
 
 interface OnboardingWizardProps {
     onComplete: () => void

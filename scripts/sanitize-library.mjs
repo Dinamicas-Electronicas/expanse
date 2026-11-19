@@ -6,8 +6,8 @@ const libraryDir = path.resolve(process.cwd(), 'data/library');
 function normalizeName(name) {
     return name
         .toLowerCase()
-        .replace(/[\s\-_]+/g, '-')
-        .replace(/[^a-z0-9\-]/g, '')
+        .replace(/[\s_-]+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
         .replace(/^-|-$/g, '');
 }
 

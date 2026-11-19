@@ -45,10 +45,26 @@ vi.mock('@/store/systemStore', () => ({
 
 vi.mock('@/store/selection', () => ({
   default: {
-    getState: () => ({ selectedString: '' }),
+    getState: () => ({ selectedString: '', setSelectedString: vi.fn() }),
   },
 }));
 
-global.window = {} as any;
+// The store screenshot helpers only need a minimal window. Keep the shape
+// realistic enough for libraries that read `window.location` / `history` at
+// import time (e.g. axios).
+global.window = {
+  location: {
+    href: 'http://localhost/',
+    origin: 'http://localhost',
+    search: '',
+    pathname: '/',
+  },
+  history: {
+    pushState: vi.fn(),
+    replaceState: vi.fn(),
+  },
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+} as any;
 global.document = { querySelector: vi.fn() } as any;
-global.useComposeStore = { getState: vi.fn() } as any;
+(globalThis as any).useComposeStore = { getState: vi.fn() };

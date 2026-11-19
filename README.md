@@ -101,7 +101,8 @@ Configura HA en segundos sin ser experto en infrastructure:
 
 ### Requisitos Previos
 
-- Docker Engine 20.10+ y Docker Compose v2
+- Docker Engine 20.10+ y Docker Compose v2 (con el plugin `buildx`)
+- pnpm 12 (solo para desarrollo local y para `pnpm generate-secrets`)
 - MongoDB 5.0+ (incluido en el stack)
 - 4GB RAM mínimo recomendado
 - Puerto 4000 disponible
@@ -112,17 +113,25 @@ Configura HA en segundos sin ser experto en infrastructure:
 # Opción 1: Clone y ejecuta
 git clone https://github.com/lordpietre/expanse.git
 cd expanse
-docker compose up -d
+
+# Genera .env con SECRET_KEY, DB_USER y DB_PASS aleatorios
+pnpm generate-secrets
+
+docker compose up -d --build
 
 # Accede a http://localhost:4000
 ```
 
+> `SECRET_KEY`, `DB_USER` y `DB_PASS` son obligatorios: `docker compose` falla de
+> forma explícita si faltan, en lugar de arrancar con credenciales por defecto.
+
 ```bash
-# Opción 2: Docker Run directo
+# Opción 2: Docker Run directo (requiere un MongoDB accesible)
 docker run -d \
   --name expanse \
-  -p 4000:4000 \
-  -p 27017:27017 \
+  -p 4000:3000 \
+  -e SECRET_KEY="$(openssl rand -hex 32)" \
+  -e MONGODB_URI="mongodb://usuario:password@host:27017/expanse?authSource=admin" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   lordpietre/expanse:latest
 ```

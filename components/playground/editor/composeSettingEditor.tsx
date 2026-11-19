@@ -7,6 +7,7 @@ import { ComposeVersion, Env, Network, Service, Volume } from "expanse-docker-li
 import { Button } from "@/components/ui/button";
 import { Container, Folder, Key, NetworkIcon, Save } from "lucide-react";
 import { generateRandomName } from "@/lib/utils";
+import { sanitizeDockerName } from "@/lib/dockerCompose";
 import QuickToolType from "@/components/ui/quickToolType";
 import toast from "react-hot-toast";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -22,9 +23,11 @@ const VolumeWizard = () => {
     const [isOpen, setIsOpen] = useState(false);
 
     const handleCreate = () => {
+        // Compose only accepts [a-zA-Z0-9._-] for volume keys.
+        const volumeName = sanitizeDockerName(name, 'volume');
         setCompose((current) => {
             const newVolOptions: any = {
-                name,
+                name: volumeName,
                 labels: [{ id: Math.random().toString(36).substr(2, 9), key: "expanse.persistence", value: "true" }]
             };
             if (size.trim() !== "" && size.match(/\d/)) {
@@ -33,7 +36,7 @@ const VolumeWizard = () => {
             current.volumes.add(new Volume(newVolOptions));
         });
         setIsOpen(false);
-        toast.success(`Volume ${name} (${size}) created with persistence`);
+        toast.success(`Volume ${volumeName} (${size}) created with persistence`);
         setName(generateRandomName()); // Reset for next time
     };
 

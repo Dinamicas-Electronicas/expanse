@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { recreatePositionMap, recreateConnectionMap } from '@/lib/metadata';
 import type { PositionMap, ConnectionMapEntry } from '@/lib/metadata';
 
@@ -18,7 +18,7 @@ describe('lib/metadata', () => {
     });
 
     it('should return empty map for undefined input', () => {
-      const result = recreatePositionMap(undefined);
+      const result = recreatePositionMap(undefined as unknown as PositionMap[]);
       expect(result.size).toBe(0);
     });
 

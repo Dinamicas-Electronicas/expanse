@@ -1,19 +1,20 @@
 "use client"
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Server, Shield, Database, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Server, Shield, Database, Loader2, AlertCircle } from "lucide-react";
+import type { DatabaseHAConfig } from "@/types/library";
 
 interface HaDeploymentDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onConfirm: (haConfig: HaDeploymentConfig) => void;
     isLoading?: boolean;
+    templateHaConfig?: DatabaseHAConfig | null; // Full HA config from template
 }
 
 export interface HaDeploymentConfig {
@@ -24,12 +25,37 @@ export interface HaDeploymentConfig {
     enableConnectionPool: boolean;
 }
 
-export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading }: HaDeploymentDialogProps) {
+export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading, templateHaConfig }: HaDeploymentDialogProps) {
     const [enabled, setEnabled] = useState(false);
     const [minReplicas, setMinReplicas] = useState(2);
     const [maxReplicas, setMaxReplicas] = useState(5);
     const [enableLoadBalancer, setEnableLoadBalancer] = useState(true);
     const [enableConnectionPool, setEnableConnectionPool] = useState(true);
+    
+
+    // Initialize from template HA config if available
+    useEffect(() => {
+        if (templateHaConfig && templateHaConfig.replication?.enabled) {
+            setEnabled(true);
+            if (templateHaConfig.replication?.replicas) {
+                setMinReplicas(Math.max(2, templateHaConfig.replication.replicas.length));
+                setMaxReplicas(Math.max(5, templateHaConfig.replication.replicas.length + 2));
+            }
+            if (templateHaConfig.connectionPool?.enabled) {
+                setEnableConnectionPool(true);
+            }
+            if (templateHaConfig.loadBalancer?.enabled) {
+                setEnableLoadBalancer(true);
+            }
+        } else {
+            // Reset to defaults if no template config
+            setEnabled(false);
+            setMinReplicas(2);
+            setMaxReplicas(5);
+            setEnableLoadBalancer(true);
+            setEnableConnectionPool(true);
+        }
+    }, [templateHaConfig]);
 
     const handleConfirm = () => {
         onConfirm({
@@ -41,7 +67,7 @@ export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading }:
         });
     };
 
-    const handleSkip = () => {
+    const handleDeployWithoutHA = () => {
         onConfirm({
             enabled: false,
             minReplicas: 1,
@@ -51,34 +77,51 @@ export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading }:
         });
     };
 
+    const hasTemplateHA = !!templateHaConfig?.replication?.enabled;
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md">
+            <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <Server className="w-5 h-5" />
                         High Availability Deployment
                     </DialogTitle>
                     <DialogDescription>
-                        Configure your application for high availability with multiple instances,
-                        load balancing, and connection pooling.
+                        {hasTemplateHA ? (
+                            <>This stack includes a pre-configured HA setup. Choose to deploy with the recommended HA configuration or customize.</>
+                        ) : (
+                            <>Configure your application for high availability with multiple instances, load balancing, and connection pooling.</>
+                        )}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-6 py-4">
                     <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                            <Label htmlFor="ha-enabled">Enable HA</Label>
+                            <Label htmlFor="ha-enabled">Enable High Availability</Label>
                             <p className="text-sm text-slate-500">
-                                Deploy with multiple replicas and failover
+                                {hasTemplateHA 
+                                    ? "Uses template's pre-configured HA setup (Patroni, HAProxy, PgBouncer)"
+                                    : "Deploy with multiple replicas and automatic failover"}
                             </p>
                         </div>
                         <Switch
                             id="ha-enabled"
                             checked={enabled}
                             onCheckedChange={setEnabled}
+                            disabled={hasTemplateHA}
                         />
                     </div>
+
+                    {hasTemplateHA && !enabled && (
+                        <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4 text-amber-400" />
+                            <p className="text-sm text-amber-400">
+                                This template has a recommended HA configuration. Disabling HA will deploy a single instance without failover.
+                            </p>
+                        </div>
+                    )}
 
                     {enabled && (
                         <>
@@ -95,7 +138,7 @@ export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading }:
                                     </div>
                                     <Slider
                                         value={[minReplicas]}
-                                        min={2}
+                                        min={hasTemplateHA ? 3 : 2}
                                         max={maxReplicas}
                                         step={1}
                                         onValueChange={([v]) => setMinReplicas(v)}
@@ -166,9 +209,9 @@ export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading }:
                     )}
                 </div>
 
-                <DialogFooter className="gap-2 sm:gap-0">
-                    <Button variant="ghost" onClick={handleSkip} disabled={isLoading}>
-                        Skip HA
+                <DialogFooter className="gap-2 sm:gap-0 flex-wrap">
+                    <Button variant="outline" onClick={handleDeployWithoutHA} disabled={isLoading} className="flex-1">
+                        Deploy without HA
                     </Button>
                     <Button onClick={handleConfirm} disabled={isLoading}>
                         {isLoading ? (
@@ -179,7 +222,7 @@ export function HaDeploymentDialog({ open, onOpenChange, onConfirm, isLoading }:
                         ) : enabled ? (
                             <>Deploy with HA</>
                         ) : (
-                            <>Deploy Standard</>
+                            <>Deploy without HA</>
                         )}
                     </Button>
                 </DialogFooter>

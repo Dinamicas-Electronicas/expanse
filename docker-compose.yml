@@ -4,7 +4,6 @@ services:
   app:
     build: .
     image: expanse:local
-    pull_policy: build
     ports:
       - "4000:3000"
     environment:
@@ -13,8 +12,8 @@ services:
       - DISABLE_SIGNUP=${DISABLE_SIGNUP:-false}
       - BREVO_DISABLED=${BREVO_DISABLED:-true}
       - URL=${APP_URL:-http://localhost:4000}
-      - SECRET_KEY=${SECRET_KEY:-please_change_me_to_something_secure}
-      - MONGODB_URI=mongodb://${DB_USER:-dev}:${DB_PASS:-dev}@db:27017/expanse?authSource=admin
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set; run pnpm generate-secrets}
+      - MONGODB_URI=mongodb://${DB_USER:?DB_USER must be set}:${DB_PASS:?DB_PASS must be set}@db:27017/expanse?authSource=admin
     depends_on:
       db:
         condition: service_healthy
@@ -25,24 +24,40 @@ services:
       retries: 5
       start_period: 40s
     restart: unless-stopped
-    # We need root or being in docker group to access the socket
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    # We need root or being in the docker group to access the socket
     user: root
     networks:
       - expanse-net
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./data/library:/app/data/library
+      # Read-only: the library is baked into the image and rebuilt by
+      # `pnpm sync-icons`, the container should never mutate it.
+      - ./data/library:/app/data/library:ro
+      # Generated PNG exports must survive container restarts.
+      - expanse_exports:/app/public/exports
 
   db:
-    image: mongo:8
+    image: mongo:7.0
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${DB_USER:-dev}
-      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASS:-dev}
+      MONGO_INITDB_ROOT_USERNAME: ${DB_USER:?DB_USER must be set; run pnpm generate-secrets}
+      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASS:?DB_PASS must be set; run pnpm generate-secrets}
     volumes:
       - expanse_db_data:/data/db
     networks:
       - expanse-net
     restart: unless-stopped
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -56,3 +71,4 @@ networks:
 
 volumes:
   expanse_db_data:
+  expanse_exports:

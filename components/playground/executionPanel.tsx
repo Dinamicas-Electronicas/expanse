@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 import { ExecutionPanelErrorBoundary } from "@/components/ui/errorBoundary";
 import { HaMetricsPanel } from "@/components/playground/haMetricsPanel";
+import { ServiceViewer } from "@/components/playground/viewer";
 const TerminalDialog = dynamic(() => import("./terminalDialog"), { ssr: false });
 
 interface ExecutionPanelProps {
@@ -24,6 +25,41 @@ export default function ExecutionPanel({ haConfig }: ExecutionPanelProps) {
     const [activeContainer, setActiveContainer] = React.useState<{ id: string; name: string } | null>(null);
     const t = useTranslations('execution');
 
+    const services = Object.values(serviceStatuses);
+
+    // Extract viewer services from running services with web ports
+    const viewerServices = React.useMemo(() => {
+        const viewers = [];
+        for (const service of Object.values(serviceStatuses)) {
+            if (!service.ports || service.status !== 'running') continue;
+            
+            // Extract host port from ports string like "0.0.0.0:8080->80/tcp, :::8080->80/tcp"
+            const portMatch = service.ports.match(/0\.0\.0\.0:(\d+)->(\d+)\/tcp/);
+            if (!portMatch) continue;
+            
+            const hostPort = parseInt(portMatch[1]);
+            const containerPort = parseInt(portMatch[2]);
+            
+            // Check if this is a known web service (common web ports)
+            const webPorts = [80, 443, 3000, 4000, 5000, 8000, 8080, 8081, 8443, 9000, 2368, 4000];
+            if (!webPorts.includes(containerPort)) continue;
+
+            viewers.push({
+                serviceId: service.id,
+                serviceName: service.name,
+                displayName: service.name,
+                icon: 'globe',
+                url: `http://localhost:${hostPort}`,
+                internalUrl: `http://${service.name}:${containerPort}`,
+                healthCheckUrl: `http://localhost:${hostPort}`,
+                status: 'healthy' as const,
+                lastChecked: new Date(),
+                startupTimeEstimate: 30
+            });
+        }
+        return viewers;
+    }, [serviceStatuses]);
+
     if (!isExecuting && Object.keys(serviceStatuses).length === 0) {
         return (
             <div className="flex flex-col items-center justify-center p-8 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
@@ -32,8 +68,6 @@ export default function ExecutionPanel({ haConfig }: ExecutionPanelProps) {
             </div>
         );
     }
-
-    const services = Object.values(serviceStatuses);
 
     const openTerminal = (id: string, name: string) => {
         setActiveContainer({ id, name });
@@ -110,6 +144,16 @@ export default function ExecutionPanel({ haConfig }: ExecutionPanelProps) {
             </div>
 
             {haConfig?.enabled && <HaMetricsPanel minReplicas={haConfig.minReplicas} maxReplicas={haConfig.maxReplicas} />}
+
+            {viewerServices.length > 0 && (
+                <ServiceViewer
+                    services={viewerServices}
+                    onOpenLogs={(serviceName) => {
+                        const svc = services.find(s => s.name === serviceName);
+                        if (svc) openTerminal(svc.id, svc.name);
+                    }}
+                />
+            )}
 
             <div className="p-4 h-[200px] overflow-y-auto font-mono text-[10px] text-slate-300 custom-scrollbar whitespace-pre-wrap leading-relaxed">
                     {logs ? logs : (

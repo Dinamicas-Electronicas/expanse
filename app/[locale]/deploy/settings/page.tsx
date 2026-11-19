@@ -96,7 +96,7 @@ function PasswordModal({
             onConfirm(true, deleteVolumes);
             setLoading(false);
             setValue("");
-        } catch (err) {
+        } catch {
             setError("Verification failed. Please try again.");
             setLoading(false);
         }
@@ -199,7 +199,6 @@ function ProjectDetail({
 
     // Poll for stats if running
     useEffect(() => {
-        let interval: NodeJS.Timeout;
         const fetchStats = async () => {
             if (project.Status?.includes("running")) {
                 const s = await getComposeStats(project.Name);
@@ -208,7 +207,7 @@ function ProjectDetail({
         };
 
         fetchStats();
-        interval = setInterval(fetchStats, 3000);
+        const interval = setInterval(fetchStats, 3000);
         return () => clearInterval(interval);
     }, [project.Name, project.Status]);
 
@@ -555,10 +554,10 @@ export default function DashboardPage() {
     }, []);
 
     useEffect(() => {
-        fetchData();
         const interval = setInterval(fetchData, 5000);
+        fetchData(); // Initial fetch
         return () => clearInterval(interval);
-    }, []);
+    }, [fetchData]);
 
     // Debounced search
     useEffect(() => {

@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 
-export default function TermsContent({ locale }: { locale: string }) {
+export default function TermsContent() {
     const t = useTranslations('terms');
 
     return <>

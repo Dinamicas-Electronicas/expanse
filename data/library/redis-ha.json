@@ -1,0 +1,172 @@
+{
+  "name": "Redis HA (Sentinel)",
+  "description": "High Availability Redis cluster with Sentinel for automatic failover, master/replica replication, and read scaling",
+  "category": "Database",
+  "logo": "redis",
+  "image": "redis:7.2-alpine",
+  "isStack": true,
+  "haEnabled": true,
+  "default_ports": ["6379:6379", "26379:26379"],
+  "env_vars": {
+    "REDIS_PASSWORD": "redis",
+    "SENTINEL_QUORUM": "2",
+    "SENTINEL_DOWN_AFTER": "5000",
+    "SENTINEL_FAILOVER_TIMEOUT": "60000",
+    "MASTER_NAME": "expanse-master"
+  },
+  "volumes": ["redis-primary-data:/data"],
+  "databaseHA": {
+    "replication": {
+      "enabled": true,
+      "mode": "async",
+      "primaryRegion": "primary",
+      "replicas": [
+        { "region": "replica-1", "role": "sync", "priority": 100 },
+        { "region": "replica-2", "role": "async", "priority": 50 }
+      ]
+    },
+    "failover": {
+      "enabled": true,
+      "timeout": 30,
+      "maxRetries": 3,
+      "healthCheckInterval": 10,
+      "promotionPolicy": "priority"
+    },
+    "connectionPool": {
+      "enabled": false,
+      "type": "redis-sentinel",
+      "mode": "session",
+      "poolSize": 50,
+      "maxConnections": 1000,
+      "idleTimeout": 300
+    },
+    "loadBalancer": {
+      "enabled": true,
+      "type": "haproxy",
+      "algorithm": "round-robin",
+      "healthCheckPath": "/health",
+      "stickySessions": false,
+      "port": 6379,
+      "targetPort": 6379
+    },
+    "backup": {
+      "enabled": true,
+      "schedule": "0 */6 * * *",
+      "retentionDays": 7,
+      "storage": "local",
+      "encryption": true,
+      "pointInTimeRecovery": false
+    }
+  },
+  "related_services": [
+    {
+      "name": "redis-primary",
+      "image": "redis:7.2-alpine",
+      "env_vars": {
+        "REDIS_PASSWORD": "redis",
+        "MASTER_NAME": "expanse-master"
+      },
+      "volumes": [
+        "redis-primary-data:/data",
+        "./redis-primary.conf:/etc/redis/redis.conf:ro"
+      ],
+      "ports": ["6379:6379"],
+      "command": [
+        "redis-server",
+        "/etc/redis/redis.conf",
+        "--requirepass", "redis",
+        "--masterauth", "redis"
+      ],
+      "healthcheck": {
+        "test": ["CMD", "redis-cli", "-a", "redis", "ping"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 5
+      }
+    },
+    {
+      "name": "redis-replica",
+      "image": "redis:7.2-alpine",
+      "env_vars": {
+        "REDIS_PASSWORD": "redis",
+        "MASTER_NAME": "expanse-master"
+      },
+      "volumes": [
+        "redis-replica-data:/data",
+        "./redis-replica.conf:/etc/redis/redis.conf:ro"
+      ],
+      "ports": ["6379:6379"],
+      "command": [
+        "redis-server",
+        "/etc/redis/redis.conf",
+        "--requirepass", "redis",
+        "--masterauth", "redis",
+        "--replicaof", "redis-primary", "6379"
+      ],
+      "healthcheck": {
+        "test": ["CMD", "redis-cli", "-a", "redis", "ping"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 5
+      },
+      "deploy": {
+        "replicas": 2
+      }
+    },
+    {
+      "name": "redis-sentinel",
+      "image": "redis:7.2-alpine",
+      "env_vars": {
+        "SENTINEL_QUORUM": "2",
+        "SENTINEL_DOWN_AFTER": "5000",
+        "SENTINEL_FAILOVER_TIMEOUT": "60000",
+        "MASTER_NAME": "expanse-master",
+        "REDIS_PASSWORD": "redis"
+      },
+      "volumes": [
+        "./sentinel.conf:/etc/redis/sentinel.conf:ro"
+      ],
+      "ports": ["26379:26379"],
+      "command": [
+        "redis-sentinel",
+        "/etc/redis/sentinel.conf",
+        "--sentinel", "monitor", "expanse-master", "redis-primary", "6379", "2",
+        "--sentinel", "down-after-milliseconds", "expanse-master", "5000",
+        "--sentinel", "failover-timeout", "expanse-master", "60000",
+        "--sentinel", "auth-pass", "expanse-master", "redis",
+        "--sentinel", "parallel-syncs", "expanse-master", "1"
+      ],
+      "healthcheck": {
+        "test": ["CMD", "redis-cli", "-p", "26379", "ping"],
+        "interval": "5s",
+        "timeout": "3s",
+        "retries": 3
+      },
+      "deploy": {
+        "replicas": 3
+      }
+    },
+    {
+      "name": "haproxy",
+      "image": "haproxy:2.9-alpine",
+      "volumes": [
+        "./haproxy-redis.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"
+      ],
+      "ports": [
+        "6379:6379",
+        "8404:8404"
+      ],
+      "depends_on": {
+        "redis-primary": { "condition": "service_healthy" },
+        "redis-replica": { "condition": "service_healthy" },
+        "redis-sentinel": { "condition": "service_healthy" }
+      },
+      "healthcheck": {
+        "test": ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 3
+      }
+    }
+  ]
+}

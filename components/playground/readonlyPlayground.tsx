@@ -21,7 +21,6 @@ interface options {
 
 export default function ReadOnlyPlayGround(opt: options) {
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const [compose, setCompose] = useState(new Compose())
     const [positionMap, setPositionMap] = useState<Map<string, NodeData>>(new Map())
 
@@ -71,7 +70,6 @@ export default function ReadOnlyPlayGround(opt: options) {
     }, [positionMap]);
 
     const onNodesChanges = useCallback(
-        // eslint-disable-next-line
         (changes: any[]) => {
             changes.forEach((change) => {
                 if (change?.type === "position") {

@@ -9,20 +9,27 @@ import useComposeIdStore from "@/store/composeId";
 import toast from "react-hot-toast";
 import usePositionMap from "@/store/metadataMap";
 import { extractMetadata } from "@/lib/metadata";
+import { sanitizeDockerName } from "@/lib/dockerCompose";
 import useDisableStateStore from "@/store/disabled";
 import { TemplateService } from "@/types/library";
 import { useSystemStore } from "@/store/systemStore";
 import useSelectionStore from "@/store/selection";
+import { DatabaseHAConfig } from "@/types/library";
+import { useHAStore } from "@/store/ha";
 
 interface ComposeState {
     compose: Compose;
     tick: number;
     isDirty: boolean;
+    haConfig: DatabaseHAConfig | null;
+    haEnabled: boolean;
     setCompose: (updater: (currentCompose: Compose) => void) => Promise<boolean>;
     replaceCompose: (newCompose: Compose, options?: { disableSave?: boolean }) => void;
     addServiceFromTemplate: (template: TemplateService) => Promise<void>;
     addServiceFromImage: (imageName: string) => Promise<void>;
     resetCompose: () => void;
+    setHAConfig: (config: DatabaseHAConfig | null) => void;
+    setHAEnabled: (enabled: boolean) => void;
 }
 
 export async function save(compose: Compose) {
@@ -102,7 +109,7 @@ let beforeunloadHandlerSetup = false;
 const setupBeforeUnloadHandler = () => {
     if (typeof window !== 'undefined' && !beforeunloadHandlerSetup) {
         beforeunloadHandlerSetup = true;
-        window.addEventListener('beforeunload', (event) => {
+        window.addEventListener('beforeunload', () => {
             const { isDirty, compose } = useComposeStore.getState();
             const { state: disabledSave } = useDisableStateStore.getState();
             if (isDirty && !disabledSave) {
@@ -120,6 +127,8 @@ export const useComposeStore = create<ComposeState>((set, get) => {
         compose: new Compose({ name: generateRandomName() }),
         tick: 0,
         isDirty: false,
+        haConfig: null,
+        haEnabled: false,
         setCompose: async (updater: (currentCompose: Compose) => void) => {
             const { state: disabledSave } = useDisableStateStore.getState();
             const { compose, tick } = get();
@@ -145,7 +154,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                 newCompose.name = generateRandomName();
             }
 
-            set({ compose: newCompose, tick: get().tick + 1, isDirty: !disableSave });
+            set({ compose: newCompose, tick: get().tick + 1, isDirty: !disableSave, haConfig: null, haEnabled: false });
 
             if (!disableSave) {
                 debouncedSave(newCompose);
@@ -156,7 +165,9 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             set({
                 compose: newCompose,
                 tick: get().tick + 1,
-                isDirty: false
+                isDirty: false,
+                haConfig: null,
+                haEnabled: false
             });
 
             // Reset metadata, selection and ID
@@ -165,6 +176,13 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             usePositionMap.getState().setPositionMap(new Map());
             usePositionMap.getState().setConnectionMap(new Map());
 
+            // Clear HA store for this compose
+            const composeId = useComposeIdStore.getState().id;
+            if (composeId) {
+                useHAStore.getState().clearHAConfig(composeId);
+                useHAStore.getState().stopPolling(composeId);
+            }
+
             // Clean URL
             if (typeof window !== 'undefined') {
                 const url = new URL(window.location.href);
@@ -172,10 +190,41 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                 window.history.replaceState({}, '', url.toString());
             }
         },
+        setHAConfig: (config: DatabaseHAConfig | null) => {
+            set({ haConfig: config });
+            if (config) {
+                useHAStore.getState().setHAConfig(useComposeIdStore.getState().id || '', config);
+            }
+        },
+        setHAEnabled: (enabled: boolean) => {
+            set({ haEnabled: enabled });
+        },
         addServiceFromTemplate: async (template: TemplateService) => {
             const { setCompose } = useComposeStore.getState();
 
             const stackSuffix = generateRandomName().substring(0, 4);
+
+            // Save HA config from template if available
+            if (template.databaseHA && template.haEnabled) {
+                get().setHAConfig(template.databaseHA);
+                get().setHAEnabled(true);
+            } else if (template.databaseHa && template.haEnabled) {
+                // Legacy HA config
+                const legacyConfig: DatabaseHAConfig = {
+                    replication: template.databaseHa.type === 'patroni' ? {
+                        enabled: true,
+                        mode: 'async',
+                        primaryRegion: 'primary',
+                        replicas: [{ region: 'replica-1', role: 'async', priority: 50 }]
+                    } : undefined,
+                    failover: { enabled: true, timeout: 30, maxRetries: 3, healthCheckInterval: 10, promotionPolicy: 'priority' },
+                    connectionPool: { enabled: template.databaseHa.type === 'pgbouncer', type: 'pgbouncer', mode: template.databaseHa.poolMode || 'transaction', poolSize: template.databaseHa.poolSize || 25, maxConnections: template.databaseHa.maxConnections || 1000, idleTimeout: 600 },
+                    loadBalancer: { enabled: false, type: 'haproxy', algorithm: 'round-robin', healthCheckPath: '/health', stickySessions: false, port: 5432, targetPort: 5432 },
+                    backup: { enabled: true, schedule: '0 2 * * *', retentionDays: 7, storage: 'local', encryption: true, pointInTimeRecovery: true }
+                };
+                get().setHAConfig(legacyConfig);
+                get().setHAEnabled(true);
+            }
 
             const createService = (tmp: TemplateService, isRelated = false): Service => {
                 const [imageName, imageTag] = tmp.image.split(':');
@@ -215,7 +264,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                     });
                 }
 
-                const baseName = tmp.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+                const baseName = sanitizeDockerName(tmp.name, 'service');
                 // Use the consistent stack suffix
                 const finalName = isRelated && baseName.length < 8 ? baseName : baseName + "_" + stackSuffix;
 
@@ -234,7 +283,9 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                 const addNetwork = !!template.related_services;
                 let stackNetwork: Network | undefined;
                 if (addNetwork) {
-                    const netName = template.name.toLowerCase().replace(/\s+/g, '') + "_net";
+                    // Compose requires `[a-zA-Z0-9._-]+`; stack names such as
+                    // "WordPress (Fullstack)" used to produce an invalid key.
+                    const netName = `${sanitizeDockerName(template.name, 'stack')}_net`;
                     stackNetwork = new Network({ name: netName });
                     compose.addNetwork(stackNetwork);
                 }
@@ -249,7 +300,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                 const nameMap = new Map<string, string>();
 
                 // Add main service to name map
-                const mainBaseName = template.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+                const mainBaseName = sanitizeDockerName(template.name, 'service');
                 nameMap.set(mainBaseName, mainService.name);
 
                 if (template.related_services) {
@@ -259,7 +310,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
                             relService.networks = new SuperSet<Network>([stackNetwork]);
                         }
 
-                        const baseName = rel.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+                        const baseName = sanitizeDockerName(rel.name, 'service');
                         nameMap.set(baseName, relService.name);
 
                         allServices.push(relService);

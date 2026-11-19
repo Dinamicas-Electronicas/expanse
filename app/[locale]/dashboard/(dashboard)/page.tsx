@@ -12,8 +12,8 @@ import ProjectMonitor from "@/components/display/projectMonitor";
 
 export default function Page() {
     const [composes, setComposes] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
     const [selectedProject, setSelectedProject] = useState<any>(null);
+    const [, setLoading] = useState(false);
 
     const fetchData = useCallback(async () => {
         const [composesData, globalStats] = await Promise.all([

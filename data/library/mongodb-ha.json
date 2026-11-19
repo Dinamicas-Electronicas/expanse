@@ -1,0 +1,184 @@
+{
+  "name": "MongoDB HA (Replica Set)",
+  "description": "High Availability MongoDB cluster with Replica Set, automatic failover, and optional sharding support",
+  "category": "Database",
+  "logo": "mongodb",
+  "image": "mongo:7.0",
+  "isStack": true,
+  "haEnabled": true,
+  "default_ports": ["27017:27017", "27018:27017"],
+  "env_vars": {
+    "MONGO_INITDB_ROOT_USERNAME": "admin",
+    "MONGO_INITDB_ROOT_PASSWORD": "mongo",
+    "MONGO_INITDB_DATABASE": "expanse",
+    "REPLICA_SET_NAME": "expanse-rs"
+  },
+  "volumes": ["mongo-primary-data:/data/db"],
+  "databaseHA": {
+    "replication": {
+      "enabled": true,
+      "mode": "sync",
+      "primaryRegion": "primary",
+      "replicas": [
+        { "region": "replica-1", "role": "sync", "priority": 100 },
+        { "region": "replica-2", "role": "sync", "priority": 50 },
+        { "region": "arbiter-1", "role": "witness", "priority": 1 }
+      ]
+    },
+    "failover": {
+      "enabled": true,
+      "timeout": 30,
+      "maxRetries": 3,
+      "healthCheckInterval": 10,
+      "promotionPolicy": "priority"
+    },
+    "connectionPool": {
+      "enabled": false,
+      "type": "mongos",
+      "mode": "session",
+      "poolSize": 100,
+      "maxConnections": 2000,
+      "idleTimeout": 300
+    },
+    "loadBalancer": {
+      "enabled": true,
+      "type": "mongos",
+      "algorithm": "round-robin",
+      "healthCheckPath": "/health",
+      "stickySessions": false,
+      "port": 27017,
+      "targetPort": 27017
+    },
+    "backup": {
+      "enabled": true,
+      "schedule": "0 2 * * *",
+      "retentionDays": 7,
+      "storage": "local",
+      "encryption": true,
+      "pointInTimeRecovery": true
+    }
+  },
+  "related_services": [
+    {
+      "name": "mongo-primary",
+      "image": "mongo:7.0",
+      "env_vars": {
+        "MONGO_INITDB_ROOT_USERNAME": "admin",
+        "MONGO_INITDB_ROOT_PASSWORD": "mongo",
+        "MONGO_INITDB_DATABASE": "expanse",
+        "REPLICA_SET_NAME": "expanse-rs",
+        "MONGO_REPLICA_SET_KEY": "expanse-replica-key"
+      },
+      "volumes": [
+        "mongo-primary-data:/data/db",
+        "mongo-primary-config:/data/configdb",
+        "./mongo-primary.conf:/etc/mongod.conf:ro",
+        "./replica-set-key:/etc/mongo/keyfile:ro"
+      ],
+      "ports": ["27017:27017"],
+      "command": [
+        "mongod",
+        "--replSet", "expanse-rs",
+        "--bind_ip_all",
+        "--keyFile", "/etc/mongo/keyfile",
+        "--config", "/etc/mongod.conf"
+      ],
+      "healthcheck": {
+        "test": ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 5,
+        "start_period": "20s"
+      }
+    },
+    {
+      "name": "mongo-replica",
+      "image": "mongo:7.0",
+      "env_vars": {
+        "MONGO_INITDB_ROOT_USERNAME": "admin",
+        "MONGO_INITDB_ROOT_PASSWORD": "mongo",
+        "REPLICA_SET_NAME": "expanse-rs",
+        "MONGO_REPLICA_SET_KEY": "expanse-replica-key"
+      },
+      "volumes": [
+        "mongo-replica-data:/data/db",
+        "mongo-replica-config:/data/configdb",
+        "./mongo-replica.conf:/etc/mongod.conf:ro",
+        "./replica-set-key:/etc/mongo/keyfile:ro"
+      ],
+      "ports": ["27017:27017"],
+      "command": [
+        "mongod",
+        "--replSet", "expanse-rs",
+        "--bind_ip_all",
+        "--keyFile", "/etc/mongo/keyfile",
+        "--config", "/etc/mongod.conf"
+      ],
+      "healthcheck": {
+        "test": ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 5,
+        "start_period": "20s"
+      },
+      "deploy": {
+        "replicas": 2
+      }
+    },
+    {
+      "name": "mongo-arbiter",
+      "image": "mongo:7.0",
+      "env_vars": {
+        "REPLICA_SET_NAME": "expanse-rs",
+        "MONGO_REPLICA_SET_KEY": "expanse-replica-key"
+      },
+      "volumes": [
+        "./replica-set-key:/etc/mongo/keyfile:ro"
+      ],
+      "command": [
+        "mongod",
+        "--replSet", "expanse-rs",
+        "--bind_ip_all",
+        "--keyFile", "/etc/mongo/keyfile",
+        "--nojournal",
+        "--oplogSize", "100"
+      ],
+      "healthcheck": {
+        "test": ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 3
+      },
+      "deploy": {
+        "replicas": 1
+      }
+    },
+    {
+      "name": "mongo-init",
+      "image": "mongo:7.0",
+      "env_vars": {
+        "MONGO_INITDB_ROOT_USERNAME": "admin",
+        "MONGO_INITDB_ROOT_PASSWORD": "mongo",
+        "REPLICA_SET_NAME": "expanse-rs",
+        "PRIMARY_HOST": "mongo-primary"
+      },
+      "volumes": [
+        "./init-replica.js:/init-replica.js:ro"
+      ],
+      "command": [
+        "mongosh",
+        "--host", "mongo-primary:27017",
+        "--username", "admin",
+        "--password", "mongo",
+        "--authenticationDatabase", "admin",
+        "/init-replica.js"
+      ],
+      "depends_on": {
+        "mongo-primary": { "condition": "service_healthy" },
+        "mongo-replica": { "condition": "service_healthy" },
+        "mongo-arbiter": { "condition": "service_healthy" }
+      },
+      "restart": "no"
+    }
+  ]
+}

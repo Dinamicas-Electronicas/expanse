@@ -10,103 +10,21 @@ import YAML from 'yaml';
 import { ensureAuth } from "@/lib/auth";
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
-import { composeMetadata, generateHaproxyConfig, generatePgbouncerConfig, type HaConfig } from "@/lib/metadata";
+import { composeMetadata, generateHaproxyConfig, generateHACompose, generateAllHAConfigs } from "@/lib/metadata";
+import type { DatabaseHAConfig } from "@/types/library";
 import type { HaDeploymentConfig } from "@/components/playground/haDeploymentDialog";
+import { patchComposeYaml } from '@/lib/dockerCompose';
+import {
+    assertComposeId,
+    assertDockerIdList,
+    assertDockerReference,
+    composeProjectName,
+    composeWorkDir,
+    runCompose as runComposeCli,
+    runDocker,
+} from '@/lib/dockerExec';
 
 const execAsync = promisify(exec);
-
-/** DB healthcheck templates keyed by image substring */
-const DB_HEALTHCHECKS: Record<string, object> = {
-    mariadb: { test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD:-$${MARIADB_ROOT_PASSWORD:-}}\""], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    mysql: { test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    postgres: { test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER:-postgres}"], interval: "10s", timeout: "5s", retries: 5, start_period: "20s" },
-    mongo: { test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"], interval: "10s", timeout: "5s", retries: 5, start_period: "20s" },
-    redis: { test: ["CMD", "redis-cli", "ping"], interval: "5s", timeout: "3s", retries: 5 },
-    couchdb: { test: ["CMD-SHELL", "curl -f http://localhost:5984/_up || exit 1"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    cassandra: { test: ["CMD-SHELL", "cqlsh -e 'describe cluster' || exit 1"], interval: "10s", timeout: "5s", retries: 5, start_period: "60s" },
-    neo4j: { test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "$${NEO4J_PASSWORD:-password}", "RETURN 1"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    clickhouse: { test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"], interval: "10s", timeout: "5s", retries: 5, start_period: "20s" },
-    influxdb: { test: ["CMD", "influx", "ping"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    timescale: { test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER:-postgres}"], interval: "10s", timeout: "5s", retries: 5, start_period: "20s" },
-    cockroachdb: { test: ["CMD-SHELL", "cockroach sql --execute 'SELECT 1'"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    surrealdb: { test: ["CMD-SHELL", "surreal sql --namespace namespace --database database --user root --pass root --pretty exit 0"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    scylladb: { test: ["CMD-SHELL", "cqlsh -e 'describe cluster' || exit 1"], interval: "10s", timeout: "5s", retries: 5, start_period: "60s" },
-    memcached: { test: ["CMD", "memcached", "-v"], interval: "10s", timeout: "5s", retries: 3 },
-    dragonfly: { test: ["CMD", "redis-cli", "ping"], interval: "5s", timeout: "3s", retries: 5 },
-    influxdb2: { test: ["CMD", "influx", "ping"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    questdb: { test: ["CMD-SHELL", "curl -f http://localhost:9000/health || exit 1"], interval: "10s", timeout: "5s", retries: 5, start_period: "30s" },
-    timescaledb: { test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER:-postgres}"], interval: "10s", timeout: "5s", retries: 5, start_period: "20s" },
-}
-
-function isDbImage(image: string): string | null {
-    const img = image.toLowerCase()
-    for (const key of Object.keys(DB_HEALTHCHECKS)) {
-        if (img.includes(key)) return key
-    }
-    return null
-}
-
-/**
- * Patch the generated YAML:
- * 3. Inject resource limits from metadata
- */
-function patchComposeYaml(yamlText: string, metadata?: composeMetadata): string {
-    const doc = YAML.parse(yamlText)
-    if (!doc?.services) return yamlText
-
-    // Identify DB service names
-    const dbServiceNames = new Set<string>()
-    for (const [name, svc] of Object.entries<any>(doc.services)) {
-        const img: string = (svc.image || "").toLowerCase()
-        const key = isDbImage(img)
-        if (key) {
-            dbServiceNames.add(name)
-            // Inject healthcheck only if not already defined
-            if (!svc.healthcheck) {
-                svc.healthcheck = DB_HEALTHCHECKS[key]
-            }
-        }
-    }
-
-    // Upgrade depends_on for services that depend on a DB
-    for (const svc of Object.values<any>(doc.services)) {
-        if (!svc.depends_on) continue
-        // depends_on can be array or object
-        if (Array.isArray(svc.depends_on)) {
-            const obj: Record<string, any> = {}
-            for (const dep of svc.depends_on) {
-                obj[dep] = dbServiceNames.has(dep)
-                    ? { condition: "service_healthy" }
-                    : { condition: "service_started" }
-            }
-            svc.depends_on = obj
-        } else if (typeof svc.depends_on === 'object') {
-            for (const [dep, conf] of Object.entries<any>(svc.depends_on)) {
-                if (dbServiceNames.has(dep) && conf.condition !== "service_healthy") {
-                    conf.condition = "service_healthy"
-                }
-            }
-        }
-    }
-
-    // Inject resource limits
-    if (metadata?.resources) {
-        for (const [serviceName, limits] of Object.entries(metadata.resources)) {
-            if (doc.services[serviceName]) {
-                const svc = doc.services[serviceName];
-                if (!svc.deploy) svc.deploy = {};
-                if (!svc.deploy.resources) svc.deploy.resources = {};
-                svc.deploy.resources.limits = {
-                    cpus: limits.cpus,
-                    memory: limits.memory
-                };
-            }
-        }
-    }
-
-    return YAML.stringify(doc)
-}
-
 
 export async function runCompose(
     composeId: string,
@@ -114,110 +32,141 @@ export async function runCompose(
     haConfig?: HaDeploymentConfig
 ) {
     await ensureAuth();
-    const tempDir = path.join(os.tmpdir(), `expanse-${composeId}`);
+    const id = assertComposeId(composeId);
+    const tempDir = composeWorkDir(id);
     await fs.mkdir(tempDir, { recursive: true });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     // Fetch metadata for resource limits
     const db = await getDb();
     const collection = db.collection("composes");
-    const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+    const doc = await collection.findOne({ _id: new ObjectId(id) });
     const metadata = doc?.metadata as composeMetadata | undefined;
 
-    // Parse YAML to check for HA services and inject configs
-    let parsedYaml = YAML.parse(yamlContent);
+    // Check if compose has HA enabled in database
+    const dbHaConfig = doc?.haConfig as DatabaseHAConfig | undefined;
+    const dbHaEnabled = doc?.haEnabled === true;
 
-    // If HA is enabled, inject HA-specific configurations
-    if (haConfig?.enabled) {
-        // Inject PgBouncer configuration if connection pooling is enabled
-        if (haConfig.enableConnectionPool) {
-            const dbService = Object.entries(parsedYaml.services || {}).find(
-                ([name, svc]: [string, any]) => svc.image?.includes('postgres')
-            );
-            if (dbService) {
-                const [, dbSvc] = dbService;
-                // Add pgbouncer service if not already present
-                if (!parsedYaml.services.pgbouncer) {
-                    parsedYaml.services.pgbouncer = {
-                        image: 'edoburu/pgbouncer:latest',
-                        environment: {
-                            DATABASE_URL: `postgres://${dbSvc.environment?.POSTGRES_USER || 'postgres'}:${dbSvc.environment?.POSTGRES_PASSWORD || 'postgres'}@${dbService[0]}:5432/${dbSvc.environment?.POSTGRES_DB || 'postgres'}`,
-                            POOL_MODE: 'transaction',
-                            MAX_CLIENT_CONN: '100',
-                            DEFAULT_POOL_SIZE: '20'
-                        },
-                        ports: ['5439:5432'],
-                        depends_on: {
-                            [dbService[0]]: { condition: 'service_healthy' }
-                        }
+    let finalYaml = yamlContent;
+    let finalConfigs: Record<string, string> = {};
+
+    // If HA is enabled in database, generate full HA compose
+    if (dbHaEnabled && dbHaConfig) {
+        const dbCredentials = {
+            dbName: 'expanse', // Could be extracted from compose env vars
+            dbUser: 'postgres',
+            dbPassword: 'postgres'
+        };
+
+        // Generate HA compose and config files
+        const haResult = await generateHACompose({
+            baseCompose: YAML.parse(yamlContent),
+            haConfig: dbHaConfig,
+            projectName: `expanse-${id}`,
+            dbCredentials
+        });
+
+        finalYaml = YAML.stringify(haResult);
+        finalConfigs = generateAllHAConfigs(dbHaConfig, dbCredentials);
+
+        // Write all HA config files to temp directory
+        for (const [fileName, content] of Object.entries(finalConfigs)) {
+            await fs.writeFile(path.join(tempDir, fileName), content);
+        }
+    } else {
+        // Legacy HA injection from haDeploymentDialog (for backwards compatibility)
+        const parsedYaml = YAML.parse(yamlContent);
+
+        if (haConfig?.enabled) {
+            // Inject PgBouncer configuration if connection pooling is enabled
+            if (haConfig.enableConnectionPool) {
+                const dbServiceEntry = Object.entries(parsedYaml.services || {}).find(
+                    ([, svc]: [string, any]) => svc.image?.includes('postgres')
+                );
+                if (dbServiceEntry) {
+                    const [svcName, dbSvc] = dbServiceEntry as [string, any];
+                    if (!parsedYaml.services.pgbouncer) {
+                        parsedYaml.services.pgbouncer = {
+                            image: 'edoburu/pgbouncer:latest',
+                            environment: {
+                                DATABASE_URL: `postgres://${dbSvc.environment?.POSTGRES_USER || 'postgres'}:${dbSvc.environment?.POSTGRES_PASSWORD || 'postgres'}@${svcName}:5432/${dbSvc.environment?.POSTGRES_DB || 'postgres'}`,
+                                POOL_MODE: 'transaction',
+                                MAX_CLIENT_CONN: '100',
+                                DEFAULT_POOL_SIZE: '20'
+                            },
+                            ports: ['5439:5432'],
+                            depends_on: {
+                                [svcName]: { condition: 'service_healthy' }
+                            }
+                        };
+                    }
+                }
+            }
+
+            // Inject HAProxy configuration if load balancer is enabled
+            if (haConfig.enableLoadBalancer) {
+                const apiServices = Object.entries(parsedYaml.services || {}).filter(
+                    ([name, svc]: [string, any]) => svc.image?.includes('postgrest') || name === 'api'
+                );
+
+                if (apiServices.length > 0) {
+                    const servers = apiServices.map(([name], idx) => ({
+                        name: `${name}_${idx + 1}`,
+                        host: name,
+                        port: 3000
+                    }));
+
+                    const haproxyConfig = generateHaproxyConfig({
+                        type: 'haproxy',
+                        port: 80,
+                        targetPort: 3000,
+                        algorithm: 'round-robin',
+                        healthCheckPath: '/'
+                    }, servers);
+
+                    await fs.writeFile(path.join(tempDir, 'haproxy.conf'), haproxyConfig);
+
+                    parsedYaml.services.lb = {
+                        image: 'haproxy:2.9-alpine',
+                        ports: ['80:80'],
+                        volumes: ['./haproxy.conf:/usr/local/etc/haproxy/haproxy.cfg:ro'],
+                        depends_on: apiServices.map(([name]) => name).reduce((acc, name) => {
+                            acc[name] = { condition: 'service_started' };
+                            return acc;
+                        }, {} as Record<string, any>)
                     };
-                }
-            }
-        }
 
-        // Inject HAProxy configuration if load balancer is enabled
-        if (haConfig.enableLoadBalancer) {
-            const apiServices = Object.entries(parsedYaml.services || {}).filter(
-                ([name, svc]: [string, any]) => svc.image?.includes('postgrest') || name === 'api'
-            );
-
-            if (apiServices.length > 0) {
-                // Generate HAProxy config
-                const servers = apiServices.map(([name], idx) => ({
-                    name: `${name}_${idx + 1}`,
-                    host: name,
-                    port: 3000
-                }));
-
-                const haproxyConfig = generateHaproxyConfig({
-                    type: 'haproxy',
-                    port: 80,
-                    targetPort: 3000,
-                    algorithm: 'round-robin',
-                    healthCheckPath: '/'
-                }, servers);
-
-                // Write HAProxy config file
-                await fs.writeFile(path.join(tempDir, 'haproxy.conf'), haproxyConfig);
-
-                // Add/update HAProxy service
-                parsedYaml.services.lb = {
-                    image: 'haproxy:2.9-alpine',
-                    ports: ['80:80'],
-                    volumes: ['./haproxy.conf:/usr/local/etc/haproxy/haproxy.cfg:ro'],
-                    depends_on: apiServices.map(([name]) => name).reduce((acc, name) => {
-                        acc[name] = { condition: 'service_started' };
-                        return acc;
-                    }, {} as Record<string, any>)
-                };
-
-                // Update API services to use pgbouncer if available
-                if (haConfig.enableConnectionPool && parsedYaml.services.pgbouncer) {
-                    for (const [name, svc] of apiServices) {
-                        if (svc.environment) {
-                            svc.environment.PGRST_DB_URI = `postgres://${parsedYaml.services.pgbouncer.environment.DATABASE_URL.split('@')[1]?.split('/')[0] || 'postgres'}:5439/postgres`;
+                    if (haConfig.enableConnectionPool && parsedYaml.services.pgbouncer) {
+                        for (const [, svc] of apiServices as Array<[string, any]>) {
+                            if (svc.environment) {
+                                svc.environment.PGRST_DB_URI = `postgres://${parsedYaml.services.pgbouncer.environment.DATABASE_URL.split('@')[1]?.split('/')[0] || 'postgres'}:5439/postgres`;
+                            }
                         }
                     }
-                }
 
-                // Set replicas for API services
-                for (const [name] of apiServices) {
-                    if (!parsedYaml.services[name].deploy) {
-                        parsedYaml.services[name].deploy = {};
+                    for (const [name] of apiServices) {
+                        if (!parsedYaml.services[name].deploy) {
+                            parsedYaml.services[name].deploy = {};
+                        }
+                        parsedYaml.services[name].deploy.replicas = haConfig.minReplicas;
                     }
-                    parsedYaml.services[name].deploy.replicas = haConfig.minReplicas;
                 }
             }
         }
+
+        finalYaml = YAML.stringify(parsedYaml);
     }
 
     // Patch YAML: inject DB healthchecks + depends_on service_healthy + resource limits
-    const patchedYaml = patchComposeYaml(YAML.stringify(parsedYaml), metadata);
+    const patchedYaml = patchComposeYaml(finalYaml, metadata);
     await fs.writeFile(yamlPath, patchedYaml);
 
     try {
         // We use -p to specify a project name based on the ID to avoid collisions
-        const { stdout, stderr } = await execAsync(`docker compose -f ${yamlPath} -p expanse-project_${composeId} up -d`);
+        const { stdout, stderr } = await runComposeCli(['up', '-d'], {
+            project: composeProjectName(id),
+            yamlPath,
+        });
         console.log('Docker Compose Up:', stdout);
         if (stderr) console.error('Docker Compose Up Stderr:', stderr);
         return { success: true, message: 'Services started successfully' };
@@ -235,16 +184,17 @@ export async function runCompose(
 
 export async function stopCompose(composeId: string) {
     await ensureAuth();
-    const tempDir = path.join(os.tmpdir(), `expanse-${composeId}`);
+    const id = assertComposeId(composeId);
+    const tempDir = composeWorkDir(id);
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     try {
         const fileExists = await fs.access(yamlPath).then(() => true).catch(() => false);
-        const cmd = fileExists
-            ? `docker compose -f ${yamlPath} -p expanse-project_${composeId} down`
-            : `docker compose -p expanse-project_${composeId} down`;
 
-        const { stdout, stderr } = await execAsync(cmd);
+        const { stdout, stderr } = await runComposeCli(['down'], {
+            project: composeProjectName(id),
+            yamlPath: fileExists ? yamlPath : undefined,
+        });
         console.log('Docker Compose Down:', stdout);
         if (stderr) console.error('Docker Compose Down Stderr:', stderr);
         return { success: true, message: 'Services stopped successfully' };
@@ -256,23 +206,61 @@ export async function stopCompose(composeId: string) {
 
 export async function restartCompose(composeId: string, yamlContent: string) {
     await ensureAuth();
-    const tempDir = path.join(os.tmpdir(), `expanse-${composeId}`);
+    const id = assertComposeId(composeId);
+    const tempDir = composeWorkDir(id);
     await fs.mkdir(tempDir, { recursive: true });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     // Fetch metadata for resource limits
     const db = await getDb();
     const collection = db.collection("composes");
-    const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+    const doc = await collection.findOne({ _id: new ObjectId(id) });
     const metadata = doc?.metadata as composeMetadata | undefined;
 
+    // Check if compose has HA enabled in database
+    const dbHaConfig = doc?.haConfig as DatabaseHAConfig | undefined;
+    const dbHaEnabled = doc?.haEnabled === true;
+
+    let finalYaml = yamlContent;
+    let finalConfigs: Record<string, string> = {};
+
+    // If HA is enabled in database, generate full HA compose
+    if (dbHaEnabled && dbHaConfig) {
+        const dbCredentials = {
+            dbName: 'expanse',
+            dbUser: 'postgres',
+            dbPassword: 'postgres'
+        };
+
+        const haResult = await generateHACompose({
+            baseCompose: YAML.parse(yamlContent),
+            haConfig: dbHaConfig,
+            projectName: `expanse-${id}`,
+            dbCredentials
+        });
+
+        finalYaml = YAML.stringify(haResult);
+        finalConfigs = generateAllHAConfigs(dbHaConfig, dbCredentials);
+
+        // Write all HA config files to temp directory
+        for (const [fileName, content] of Object.entries(finalConfigs)) {
+            await fs.writeFile(path.join(tempDir, fileName), content);
+        }
+    }
+
     // Patch YAML: inject DB healthchecks + depends_on service_healthy + resource limits
-    const patchedYaml = patchComposeYaml(yamlContent, metadata);
+    const patchedYaml = patchComposeYaml(finalYaml, metadata);
     await fs.writeFile(yamlPath, patchedYaml);
 
     try {
-        await execAsync(`docker compose -f ${yamlPath} -p expanse-project_${composeId} down --remove-orphans`);
-        const { stdout, stderr } = await execAsync(`docker compose -f ${yamlPath} -p expanse-project_${composeId} up -d --build --force-recreate`);
+        await runComposeCli(['down', '--remove-orphans'], {
+            project: composeProjectName(id),
+            yamlPath,
+        });
+        const { stdout, stderr } = await runComposeCli(['up', '-d', '--build', '--force-recreate'], {
+            project: composeProjectName(id),
+            yamlPath,
+        });
 
         console.log('Docker Compose Restart:', stdout);
         if (stderr) console.error('Docker Compose Restart Stderr:', stderr);
@@ -291,16 +279,17 @@ export async function restartCompose(composeId: string, yamlContent: string) {
 
 export async function getComposeStatus(composeId: string) {
     await ensureAuth();
-    const tempDir = path.join(os.tmpdir(), `expanse-${composeId}`);
+    const id = assertComposeId(composeId);
+    const tempDir = composeWorkDir(id);
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     try {
         const fileExists = await fs.access(yamlPath).then(() => true).catch(() => false);
-        const cmd = fileExists
-            ? `docker compose -f ${yamlPath} -p expanse-project_${composeId} ps --format json`
-            : `docker compose -p expanse-project_${composeId} ps --format json`;
 
-        const { stdout } = await execAsync(cmd);
+        const { stdout } = await runComposeCli(['ps', '--format', 'json'], {
+            project: composeProjectName(id),
+            yamlPath: fileExists ? yamlPath : undefined,
+        });
         if (!stdout.trim()) return [];
 
         // The output can be multiple JSON objects or a list depending on version
@@ -325,16 +314,17 @@ export async function getComposeStatus(composeId: string) {
 
 export async function getComposeLogs(composeId: string) {
     await ensureAuth();
-    const tempDir = path.join(os.tmpdir(), `expanse-${composeId}`);
+    const id = assertComposeId(composeId);
+    const tempDir = composeWorkDir(id);
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     try {
         const fileExists = await fs.access(yamlPath).then(() => true).catch(() => false);
-        const cmd = fileExists
-            ? `docker compose -f ${yamlPath} -p expanse-project_${composeId} logs --tail=50 --no-color`
-            : `docker compose -p expanse-project_${composeId} logs --tail=50 --no-color`;
 
-        const { stdout } = await execAsync(cmd);
+        const { stdout } = await runComposeCli(['logs', '--tail=50', '--no-color'], {
+            project: composeProjectName(id),
+            yamlPath: fileExists ? yamlPath : undefined,
+        });
         return { success: true, logs: stdout };
     } catch (error: any) {
         console.error('Docker Compose Logs Error:', error);
@@ -351,8 +341,8 @@ export async function getComposeStats(composeId: string) {
         const containers = await getComposeStatus(composeId);
         if (!containers || containers.length === 0) return [];
 
-        const ids = containers.map((c: any) => c.ID).join(' ');
-        const { stdout } = await execAsync(`docker stats ${ids} --no-stream --format json`);
+        const ids = assertDockerIdList(containers.map((c: any) => String(c.ID ?? '')).join(' '), 'container ids');
+        const { stdout } = await runDocker(['stats', ...ids, '--no-stream', '--format', 'json']);
 
         if (!stdout.trim()) return [];
 
@@ -379,11 +369,11 @@ export async function getGlobalDockerStats() {
     await ensureAuth();
     try {
         const [projectsRes, containersRes, volumesRes, networksRes, dfRes] = await Promise.all([
-            execAsync('docker compose ls --format json'),
-            execAsync('docker ps -a --format "{{json .}}"'),
-            execAsync('docker volume ls --format "{{json .}}"'),
-            execAsync('docker network ls --format json'),
-            execAsync('docker system df -v').catch(() => ({ stdout: '' }))
+            runDocker(['compose', 'ls', '--format', 'json']),
+            runDocker(['ps', '-a', '--format', '{{json .}}']),
+            runDocker(['volume', 'ls', '--format', '{{json .}}']),
+            runDocker(['network', 'ls', '--format', 'json']),
+            runDocker(['system', 'df', '-v']).catch(() => ({ stdout: '' }))
         ]);
 
         const parseJson = (stdout: string) => {
@@ -464,7 +454,7 @@ export async function getSystemInfo() {
 
         let diskInfo = { total: 'Unknown', used: 'Unknown', free: 'Unknown', usage: '0%' };
         try {
-            const { stdout } = await execAsync('df -h / | awk \'NR==2 {print $2, $3, $4, $5}\'');
+            const { stdout } = await execAsync('df -h / | awk \'NR==2 {print $2, $3, $4, $5}\''); // static command, no user input
             const [total, used, free, usage] = stdout.trim().split(/\s+/);
             diskInfo = { total, used, free, usage };
         } catch (e) {
@@ -488,7 +478,7 @@ export async function getSystemInfo() {
 export async function getUsedDockerPorts(): Promise<number[]> {
     await ensureAuth();
     try {
-        const { stdout } = await execAsync('docker ps --format="{{.Ports}}"');
+        const { stdout } = await runDocker(['ps', '--format', '{{.Ports}}']);
         if (!stdout.trim()) return [];
 
         const ports = new Set<number>();
@@ -555,7 +545,8 @@ export async function getAvailablePort(preferred: number): Promise<number> {
 export async function stopProjectByName(projectName: string) {
     await ensureAuth();
     try {
-        const { stdout, stderr } = await execAsync(`docker compose -p ${projectName} stop`);
+        const project = assertDockerReference(projectName, 'project name');
+        const { stdout, stderr } = await runComposeCli(['stop'], { project });
         console.log('Stop project:', stdout);
         if (stderr) console.error('Stop project stderr:', stderr);
         return { success: true };
@@ -567,44 +558,45 @@ export async function stopProjectByName(projectName: string) {
 export async function removeProjectByName(projectName: string, deleteVolumes: boolean = true) {
     await ensureAuth();
     try {
-        const downFlags = deleteVolumes ? "--volumes --remove-orphans" : "--remove-orphans";
+        const project = assertDockerReference(projectName, 'project name');
+        const downArgs = deleteVolumes ? ['down', '--volumes', '--remove-orphans'] : ['down', '--remove-orphans'];
 
         // 1. Try standard compose down (best effort, may fail without yaml file)
         try {
-            const { stdout, stderr } = await execAsync(`docker compose -p ${projectName} down ${downFlags}`);
+            const { stdout, stderr } = await runComposeCli(downArgs, { project });
             console.log('Remove project standard:', stdout);
             if (stderr && !stderr.includes('no container') && !stderr.includes('Network')) {
                 console.log('Remove project stderr:', stderr);
             }
         } catch (composeError) {
             // Compose down failed, but we'll clean up by label below
-            console.log('Compose down skipped, will cleanup by label:', composeError.message);
+            console.log('Compose down skipped, will cleanup by label:', composeError instanceof Error ? composeError.message : composeError);
         }
 
         // 2. Force remove any containers with this project label
-        const { stdout: containerIds } = await execAsync(`docker ps -a --filter "label=com.docker.compose.project=${projectName}" -q`);
+        const { stdout: containerIds } = await runDocker(['ps', '-a', '--filter', `label=com.docker.compose.project=${project}`, '-q']);
         if (containerIds.trim()) {
-            const ids = containerIds.trim().split(/\s+/).join(' ');
-            console.log('Removing containers by label:', ids);
-            await execAsync(`docker rm -f ${ids}`);
+            const ids = assertDockerIdList(containerIds, 'container ids');
+            console.log('Removing containers by label:', ids.join(' '));
+            await runDocker(['rm', '-f', ...ids]);
         }
 
         // 3. Remove volumes if requested
         if (deleteVolumes) {
-            const { stdout: volumeNames } = await execAsync(`docker volume ls --filter "label=com.docker.compose.project=${projectName}" -q`);
+            const { stdout: volumeNames } = await runDocker(['volume', 'ls', '--filter', `label=com.docker.compose.project=${project}`, '-q']);
             if (volumeNames.trim()) {
-                const names = volumeNames.trim().split(/\s+/).join(' ');
-                console.log('Removing volumes by label:', names);
-                await execAsync(`docker volume rm -f ${names}`);
+                const names = assertDockerIdList(volumeNames, 'volume names');
+                console.log('Removing volumes by label:', names.join(' '));
+                await runDocker(['volume', 'rm', '-f', ...names]);
             }
         }
 
         // 4. Remove networks
-        const { stdout: networkNames } = await execAsync(`docker network ls --filter "label=com.docker.compose.project=${projectName}" -q`);
+        const { stdout: networkNames } = await runDocker(['network', 'ls', '--filter', `label=com.docker.compose.project=${project}`, '-q']);
         if (networkNames.trim()) {
-            const names = networkNames.trim().split(/\s+/).join(' ');
-            console.log('Removing networks by label:', names);
-            await execAsync(`docker network rm ${names}`);
+            const names = assertDockerIdList(networkNames, 'network names');
+            console.log('Removing networks by label:', names.join(' '));
+            await runDocker(['network', 'rm', ...names]);
         }
 
         return {
@@ -620,7 +612,8 @@ export async function removeProjectByName(projectName: string, deleteVolumes: bo
 export async function stopContainer(containerId: string) {
     await ensureAuth();
     try {
-        const { stdout } = await execAsync(`docker stop ${containerId}`);
+        const container = assertDockerReference(containerId, 'container id');
+        const { stdout } = await runDocker(['stop', container]);
         console.log('Stop container:', stdout);
         return { success: true };
     } catch (error: any) {
@@ -631,8 +624,9 @@ export async function stopContainer(containerId: string) {
 export async function removeContainer(containerId: string) {
     await ensureAuth();
     try {
-        await execAsync(`docker stop ${containerId}`).catch(() => { });
-        const { stdout } = await execAsync(`docker rm -f ${containerId}`);
+        const container = assertDockerReference(containerId, 'container id');
+        await runDocker(['stop', container]).catch(() => { });
+        const { stdout } = await runDocker(['rm', '-f', container]);
         console.log('Remove container:', stdout);
         return { success: true };
     } catch (error: any) {
@@ -643,7 +637,8 @@ export async function removeContainer(containerId: string) {
 export async function removeVolume(volumeName: string) {
     await ensureAuth();
     try {
-        const { stdout } = await execAsync(`docker volume rm -f ${volumeName}`);
+        const volume = assertDockerReference(volumeName, 'volume name');
+        const { stdout } = await runDocker(['volume', 'rm', '-f', volume]);
         console.log('Remove volume:', stdout);
         return { success: true };
     } catch (error: any) {
@@ -655,9 +650,12 @@ export async function removeVolume(volumeName: string) {
 export async function getProjectContainers(projectName: string) {
     await ensureAuth();
     try {
-        const { stdout } = await execAsync(
-            `docker ps -a --filter "label=com.docker.compose.project=${projectName}" --format json`
-        );
+        const project = assertDockerReference(projectName, 'project name');
+        const { stdout } = await runDocker([
+            'ps', '-a',
+            '--filter', `label=com.docker.compose.project=${project}`,
+            '--format', 'json',
+        ]);
         if (!stdout.trim()) return { containers: [], volumes: [] };
 
         const parseJson = (s: string) => {
@@ -673,15 +671,17 @@ export async function getProjectContainers(projectName: string) {
         const containers = parseJson(stdout);
 
         // fetch volumes for this project
-        const { stdout: volOut } = await execAsync(
-            `docker volume ls --filter "label=com.docker.compose.project=${projectName}" --format json`
-        ).catch(() => ({ stdout: '' }));
+        const { stdout: volOut } = await runDocker([
+            'volume', 'ls',
+            '--filter', `label=com.docker.compose.project=${project}`,
+            '--format', 'json',
+        ]).catch(() => ({ stdout: '' }));
 
         const volumes = volOut.trim() ? parseJson(volOut) : [];
 
         // Fetch sizes for these volumes
         try {
-            const { stdout: dfOut } = await execAsync('docker system df -v');
+            const { stdout: dfOut } = await runDocker(['system', 'df', '-v']);
             const volumeLines = dfOut.split('\n');
             let inVolumesSection = false;
             const sizeMap: Record<string, string> = {};
@@ -767,10 +767,13 @@ export async function validateComposePorts(yamlContent: string) {
 export async function execDockerCommand(containerId: string, command: string) {
     await ensureAuth();
     try {
-        // We wrap the command in sh -c to handle complex strings, spaces, and shell built-ins.
-        // We escape double quotes to safely pass the string into the exec command.
-        const escapedCommand = command.replace(/"/g, '\\"');
-        const { stdout, stderr } = await execAsync(`docker exec ${containerId} sh -c "${escapedCommand}"`);
+        const container = assertDockerReference(containerId, 'container id');
+        if (!command || typeof command !== 'string' || command.length > 8192) {
+            return { success: false, error: 'Invalid command' };
+        }
+        // Arguments are passed as an array: no shell escaping/interpolation,
+        // the command itself is still executed by `sh -c` inside the container.
+        const { stdout, stderr } = await runDocker(['exec', container, 'sh', '-c', command]);
 
         return { success: true, output: stdout || stderr || "Command executed" };
     } catch (error: any) {
@@ -821,7 +824,8 @@ export async function pullDockerImage(imageName: string) {
     }
 
     try {
-        const { stdout, stderr } = await execAsync(`docker pull "${imageName.trim()}"`);
+        const image = assertDockerReference(imageName, 'image name');
+        const { stdout, stderr } = await runDocker(['pull', image], { timeout: 30 * 60 * 1000 });
         if (stderr && stderr.includes("Error")) {
             return { success: false, error: stderr };
         }
@@ -835,7 +839,7 @@ export async function pullDockerImage(imageName: string) {
 export async function getLocalImages() {
     await ensureAuth();
     try {
-        const { stdout } = await execAsync(`docker images --format "{{json .}}"`);
+        const { stdout } = await runDocker(['images', '--format', '{{json .}}']);
         if (!stdout.trim()) return { images: [], error: null };
 
         const images = stdout.trim().split('\n').map(line => {
@@ -855,12 +859,16 @@ export async function getLocalImages() {
 
 export async function dockerSearch(query: string) {
     await ensureAuth();
-    if (!query || query.trim().length < 2) {
+    if (!query || typeof query !== 'string' || query.trim().length < 2) {
         return { results: [], error: null };
     }
 
     try {
-        const { stdout, stderr } = await execAsync(`docker search --limit 20 --format "{{json .}}" "${query.trim()}"`);
+        const term = query.trim();
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9 ._:@/-]{1,254}$/.test(term)) {
+            return { results: [], error: 'Invalid search query' };
+        }
+        const { stdout, stderr } = await runDocker(['search', '--limit', '20', '--format', '{{json .}}', term]);
         if (stderr && !stdout) {
             return { results: [], error: stderr || "Search failed" };
         }

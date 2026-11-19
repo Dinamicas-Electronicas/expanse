@@ -3,9 +3,12 @@
 ## Dev Commands
 - `pnpm dev` — local dev with turbopack (port 3000)
 - `pnpm sync-icons` — syncs library service icons (standalone script, must run before build)
+- `pnpm sanitize-library` — normalizes `logo` fields in `data/library/*.json` (run before sync-icons)
 - `pnpm build` — production build (Dockerfile runs `sync-icons` automatically; local builds need it run first)
-- `pnpm lint` — ESLint
-- `pnpm test` — Vitest unit tests
+- `pnpm lint` — ESLint 9 (flat config in `eslint.config.mjs`)
+- `pnpm test` — Vitest unit tests (config in `vitest.config.mts`, tests in `tests/`)
+- `pnpm test:docker` — runs the Docker template config/smoke integration test
+- `pnpm audit` — fails on high/critical advisories (`pnpm audit --audit-level=high`)
 
 ## Environment Setup
 - Requires `SECRET_KEY` env var (middleware redirect loop if missing)
@@ -16,18 +19,28 @@
 - `.env` file is NOT used — all config via environment variables or `docker compose`
 
 ## Package Manager
-- **pnpm** (not npm/yarn)
-- `expanse-docker-lib` is patched at `patches/expanse-docker-lib.patch` — must reinstall after patch changes
+- **pnpm 12** (not npm/yarn) — pinned via `packageManager` and the Dockerfile `PNPM_VERSION` arg
+- Project settings live in `pnpm-workspace.yaml` (pnpm >=11 ignores the `pnpm` field in `package.json`):
+  - `overrides` — security pins for transitive dependencies
+  - `patchedDependencies` — `expanse-docker-lib` patch (reinstall after changing `patches/expanse-docker-lib.patch`)
+  - `allowBuilds` — replaces pnpm 10's `onlyBuiltDependencies`
+- Run `pnpm audit` before releases; the goal is zero advisories at any severity
 
 ## Build Notes
 - `next.config.mjs` has `ignoreBuildErrors: true` and `ignoreDuringBuilds: true` — ESLint/type errors do not block builds
 - Standalone output mode (`output: 'standalone'`) — server.js is the entrypoint
 - Run `pnpm sync-icons` before `pnpm build` locally; Dockerfile runs it automatically
+- Test config: `vitest.config.mts` uses jsdom, `tests/setup.ts`, tests in `tests/**/*.test.{ts,tsx}`
+- The Docker template test (`tests/integration/dockerTemplates.integration.test.ts`) renders every
+  `data/library/*.json` into a compose file and validates it with the real `docker compose config`
+- Helper scripts in `scripts/`: `sync-icons.mjs`, `sanitize-library.mjs`
 
 ## Architecture
 - **State**: 9 Zustand stores in `store/` — `compose.ts` is central (auto-saves with 2s debounce)
 - **Canvas**: React Flow (`@xyflow/react`) + ELK.js layout — node-based Docker Compose editor in `components/playground/`
-- **Docker bridge**: Server Actions in `actions/` wrap `docker compose` CLI via `child_process.exec()`
+- **Docker bridge**: Server Actions in `actions/` wrap `docker compose` CLI through `lib/dockerExec.ts`
+  (`execFile` + argument arrays, never shell string interpolation). IDs are validated with
+  `assertComposeId()` (24-char ObjectId) and `assertDockerReference()`
 - **Auth**: JWT (HS256 via `jose`) in HTTP-only cookie, 30-day expiry. Edge middleware enforces. `lib/auth.ts` `ensureAuth()` guards all server actions
 - **Database**: MongoDB via mongoose — schemaless collections: `users`, `composes`, `shares`, `reset_code`
 - **Service library**: 138 JSON templates in `data/library/` — each follows `TemplateService` interface in `types/library.ts`
@@ -80,8 +93,9 @@ Static routes outside `[locale]`: `app/api/`, `app/robots.ts`, `app/sitemap.ts`
 1. User creates compose on canvas → `store/compose.ts` auto-saves to MongoDB
 2. Deploy validates ports via `validateComposePorts()` → auto-reassigns collisions (up to 5 retries)
 3. `dockerActions.ts` writes YAML to `/tmp/expanse-{id}/docker-compose.yaml`
-4. Patches YAML: injects DB healthchecks, `service_healthy` conditions, resource limits from metadata
-5. Runs `docker compose up -d`
+4. Patches YAML (`lib/dockerCompose.ts`): normalizes service/network/volume keys, injects DB healthchecks,
+   `service_healthy` conditions and resource limits from metadata
+5. Runs `docker compose up -d` with project name `expanse-project_<objectId>`
 
 ## Known Quirks
 - App runs as root inside container (docker group access needed)
@@ -94,13 +108,21 @@ Static routes outside `[locale]`: `app/api/`, `app/robots.ts`, `app/sitemap.ts`
 - Server actions need `getTranslations()` (not `useTranslations()`) since they run server-side
 - The `?data=` URL param on login/playground routes carries base64url-encoded compose data — locale prefix doesn't break this flow
 - `data/library/*.json` `description` fields are a mix of English and some Spanish — not yet translated via i18n keys
+- Compose keys must match `[a-zA-Z0-9._-]+`. Use `sanitizeDockerName()` from `lib/dockerCompose.ts` whenever a
+  service, network or volume name is derived from a template name or user input. Skipping it breaks stacks whose
+  names contain parentheses (e.g. `WordPress (Full Stack)` produced `wordpress(fullstack)_net`:
+  `networks additional properties ... not allowed`)
 
 ## Adding Service Templates
-Create `data/library/<service-name>.json` following the schema in `CONTRIBUTING.md`. Categories: Database, Web, Network, etc. Stack templates (multi-container) have `isStack: true` and `related_services`.
+Create `data/library/<service-name>.json` following the schema in `types/library.ts`. Categories: Database, Web, Network, etc. Stack templates (multi-container) have `isStack: true` and `related_services`; stack names may contain spaces/parentheses because keys are sanitized before deployment.
+
+Run `pnpm test` (and `pnpm test:docker` when Docker is available) after adding a template: the integration test
+validates every template against the real Compose CLI.
 
 ## CI/CD
 - Push to `main`: builds multi-arch (amd64+arm64) image, pushes to Docker Hub
-- Push to other branches: build-only test (no push)
+- Push to other branches: build-only test (no push) — `test-build.yml` runs Docker build test
+- Tag push `v*`: creates GitHub Release with multi-arch image
 
 ## HA Deployments
 When deploying, users are prompted with `HaDeploymentDialog` to choose HA options:

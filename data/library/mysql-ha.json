@@ -1,0 +1,163 @@
+{
+  "name": "MySQL HA (InnoDB Cluster)",
+  "description": "High Availability MySQL cluster with InnoDB Cluster, MySQL Router for read/write splitting, and ProxySQL connection pooling",
+  "category": "Database",
+  "logo": "mysql",
+  "image": "mysql:8.0",
+  "isStack": true,
+  "haEnabled": true,
+  "default_ports": ["3306:3306", "6446:6446", "6447:6447", "8443:8443"],
+  "env_vars": {
+    "MYSQL_ROOT_PASSWORD": "mysql",
+    "MYSQL_DATABASE": "expanse",
+    "MYSQL_USER": "expanse",
+    "MYSQL_PASSWORD": "expanse",
+    "CLUSTER_NAME": "expanse-cluster"
+  },
+  "volumes": ["mysql-primary-data:/var/lib/mysql"],
+  "databaseHA": {
+    "replication": {
+      "enabled": true,
+      "mode": "sync",
+      "primaryRegion": "primary",
+      "replicas": [
+        { "region": "replica-1", "role": "sync", "priority": 100 },
+        { "region": "replica-2", "role": "sync", "priority": 50 }
+      ]
+    },
+    "failover": {
+      "enabled": true,
+      "timeout": 30,
+      "maxRetries": 3,
+      "healthCheckInterval": 10,
+      "promotionPolicy": "priority"
+    },
+    "connectionPool": {
+      "enabled": true,
+      "type": "proxysql",
+      "mode": "transaction",
+      "poolSize": 25,
+      "maxConnections": 1000,
+      "idleTimeout": 600
+    },
+    "loadBalancer": {
+      "enabled": true,
+      "type": "mysql-router",
+      "algorithm": "round-robin",
+      "healthCheckPath": "/health",
+      "stickySessions": false,
+      "port": 6446,
+      "targetPort": 3306
+    },
+    "backup": {
+      "enabled": true,
+      "schedule": "0 2 * * *",
+      "retentionDays": 7,
+      "storage": "local",
+      "encryption": true,
+      "pointInTimeRecovery": true
+    }
+  },
+  "related_services": [
+    {
+      "name": "mysql-primary",
+      "image": "mysql:8.0",
+      "env_vars": {
+        "MYSQL_ROOT_PASSWORD": "mysql",
+        "MYSQL_DATABASE": "expanse",
+        "MYSQL_USER": "expanse",
+        "MYSQL_PASSWORD": "expanse",
+        "CLUSTER_NAME": "expanse-cluster",
+        "SERVER_ID": "1",
+        "REPLICATION_USER": "repl",
+        "REPLICATION_PASSWORD": "repl_password"
+      },
+      "volumes": ["mysql-primary-data:/var/lib/mysql", "./mysql-primary.cnf:/etc/mysql/conf.d/cluster.cnf:ro"],
+      "ports": ["3306:3306", "33060:33060"],
+      "healthcheck": {
+        "test": ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 5,
+        "start_period": "30s"
+      },
+      "command": ["--default-authentication-plugin=mysql_native_password"]
+    },
+    {
+      "name": "mysql-replica",
+      "image": "mysql:8.0",
+      "env_vars": {
+        "MYSQL_ROOT_PASSWORD": "mysql",
+        "MYSQL_DATABASE": "expanse",
+        "MYSQL_USER": "expanse",
+        "MYSQL_PASSWORD": "expanse",
+        "CLUSTER_NAME": "expanse-cluster",
+        "REPLICATION_USER": "repl",
+        "REPLICATION_PASSWORD": "repl_password"
+      },
+      "volumes": ["mysql-replica-data:/var/lib/mysql", "./mysql-replica.cnf:/etc/mysql/conf.d/cluster.cnf:ro"],
+      "ports": ["3306:3306", "33060:33060"],
+      "healthcheck": {
+        "test": ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 5,
+        "start_period": "30s"
+      },
+      "deploy": {
+        "replicas": 2
+      },
+      "command": ["--default-authentication-plugin=mysql_native_password"]
+    },
+    {
+      "name": "mysql-router",
+      "image": "mysql/mysql-router:8.0",
+      "env_vars": {
+        "ROUTER_USER": "router",
+        "ROUTER_PASSWORD": "router_password",
+        "CLUSTER_NAME": "expanse-cluster",
+        "PRIMARY_HOST": "mysql-primary",
+        "PRIMARY_PORT": "3306",
+        "ROUTER_PORT": "6446",
+        "ROUTER_X_PORT": "6447",
+        "ROUTER_HTTP_PORT": "8443"
+      },
+      "ports": ["6446:6446", "6447:6447", "8443:8443"],
+      "volumes": ["./router.conf:/etc/mysqlrouter/mysqlrouter.conf:ro"],
+      "depends_on": {
+        "mysql-primary": { "condition": "service_healthy" },
+        "mysql-replica": { "condition": "service_healthy" }
+      },
+      "healthcheck": {
+        "test": ["CMD", "curl", "-f", "http://localhost:8443/health"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 3
+      }
+    },
+    {
+      "name": "proxysql",
+      "image": "proxysql/proxysql:2.6",
+      "env_vars": {
+        "ADMIN_PASSWORD": "admin",
+        "MYSQL_USER": "expanse",
+        "MYSQL_PASSWORD": "expanse",
+        "MYSQL_HOST": "mysql-router",
+        "MYSQL_PORT": "6446",
+        "PROXYSQL_PORT": "6033",
+        "PROXYSQL_ADMIN_PORT": "6032"
+      },
+      "ports": ["6033:6033", "6032:6032"],
+      "volumes": ["./proxysql.cnf:/etc/proxysql.cnf:ro"],
+      "depends_on": {
+        "mysql-router": { "condition": "service_healthy" }
+      },
+      "healthcheck": {
+        "test": ["CMD", "mysqladmin", "ping", "-h", "localhost", "-P", "6032", "-u", "admin", "-padmin"],
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": 3
+      }
+    }
+  ]
+}

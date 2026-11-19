@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogTrigger, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -35,7 +35,7 @@ export default function ImageSearchDialog({ children }: { children: React.ReactN
         }
     }, [open])
 
-    const handleSearch = async () => {
+    const handleSearch = useCallback(async () => {
         if (!query.trim()) return
         setSearching(true)
         const res = await dockerSearch(query)
@@ -45,7 +45,7 @@ export default function ImageSearchDialog({ children }: { children: React.ReactN
             setImages(res.results)
         }
         setSearching(false)
-    }
+    }, [query])
 
     useEffect(() => {
         if (!query.trim() || query.trim().length < 2) {
@@ -54,7 +54,7 @@ export default function ImageSearchDialog({ children }: { children: React.ReactN
         }
         const timer = setTimeout(handleSearch, 500)
         return () => clearTimeout(timer)
-    }, [query])
+    }, [handleSearch, query])
 
     const handlePull = async (imageName: string) => {
         setPulling(imageName)

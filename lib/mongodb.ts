@@ -4,7 +4,6 @@ import { MongoClient } from "mongodb";
 // In development, we cache the client on the global object to survive HMR reloads.
 // In production, module-level singletons are fine (no HMR).
 declare global {
-    // eslint-disable-next-line no-var
     var _mongoClientPromise: Promise<MongoClient> | undefined;
 }
 

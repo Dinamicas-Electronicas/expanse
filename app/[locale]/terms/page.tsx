@@ -6,8 +6,7 @@ export const metadata = {
     description: "Expanse Terms and Conditions — MIT License",
 };
 
-export default async function TermsPage({ params }: { params: Promise<{ locale: string }> }) {
-    const { locale } = await params;
+export default async function TermsPage() {
     const t = await getTranslations('terms');
 
     return (
@@ -25,7 +24,7 @@ export default async function TermsPage({ params }: { params: Promise<{ locale: 
             </header>
 
             <main style={{ maxWidth: 860, margin: "0 auto", padding: "4rem 2rem 6rem" }}>
-                <TermsContent locale={locale} />
+                 <TermsContent />
             </main>
 
             <footer style={{ borderTop: "1px solid rgba(255,255,255,0.07)", padding: "2rem", textAlign: "center", fontSize: "0.75rem", color: "#64748b", letterSpacing: "0.05em" }}>

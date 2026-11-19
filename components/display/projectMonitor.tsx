@@ -1,8 +1,8 @@
 "use client"
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Cpu, Activity, RefreshCw, HardDrive, Square, Trash2, X, Plus, Boxes, Container as ContainerIcon } from "lucide-react";
-import { getComposeStats, getProjectContainers, stopProjectByName, removeProjectByName, stopContainer, removeContainer } from "@/actions/dockerActions";
+import { Cpu, Activity, RefreshCw, Container as ContainerIcon, X } from "lucide-react";
+import { getComposeStats, getProjectContainers } from "@/actions/dockerActions";
 import usePositionMap from "@/store/metadataMap";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,10 +17,10 @@ interface ProjectMonitorProps {
         status?: string | null;
     };
     onClose?: () => void;
-    onRefresh?: () => void;
+    onRefresh?: () => void | Promise<void>;
 }
 
-export default function ProjectMonitor({ project, onClose, onRefresh }: ProjectMonitorProps) {
+export default function ProjectMonitor({ project, onClose }: ProjectMonitorProps) {
     const [detail, setDetail] = useState<{ containers: any[]; volumes: any[] } | null>(null);
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState<any[]>([]);
@@ -45,7 +45,6 @@ export default function ProjectMonitor({ project, onClose, onRefresh }: ProjectM
 
     // Poll for stats
     useEffect(() => {
-        let interval: NodeJS.Timeout;
         const fetchStats = async () => {
             if (project.status?.includes("running") || project.status?.includes("Up")) {
                 const s = await getComposeStats(project.id);
@@ -54,9 +53,9 @@ export default function ProjectMonitor({ project, onClose, onRefresh }: ProjectM
         };
 
         fetchStats();
-        interval = setInterval(fetchStats, 3000);
+        const interval = setInterval(fetchStats, 3000);
         return () => clearInterval(interval);
-    }, [project.projectName, project.status]);
+    }, [project.id, project.status]);
 
     const handleReapply = () => {
         toast.error(t('pleaseRedeploy'));

@@ -21,7 +21,6 @@ import ExecutionPanel from "./executionPanel";
 import toast from "react-hot-toast";
 import { cn } from "@/lib/utils";
 import { HaDeploymentDialog, type HaDeploymentConfig } from "@/components/playground/haDeploymentDialog";
-import { extractHaConfig } from "@/lib/metadata";
 
 
 // ── Deploy Phase Types ──────────────────────────────────────────────────────
@@ -655,6 +654,7 @@ export default function PlaygroundContent() {
                 onOpenChange={setHaDialogOpen}
                 onConfirm={handleExecuteWithHa}
                 isLoading={!!deployPhase}
+                templateHaConfig={useComposeStore.getState().haConfig}
             />
         </section>
     );
