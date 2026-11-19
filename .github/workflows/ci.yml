@@ -34,6 +34,9 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      - name: License headers
+        run: pnpm license:check
+
       # Includes the integration test that renders every data/library template
       # and validates it with the real `docker compose config` (Docker is
       # available on GitHub-hosted runners).

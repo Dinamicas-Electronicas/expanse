@@ -1,5 +1,10 @@
 # syntax=docker.io/docker/dockerfile:1
 
+# Expanse — IDE visual de Docker Compose
+# Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+# Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+# Consulta el archivo LICENSE en la raíz del proyecto.
+
 FROM node:24-alpine AS base
 
 # Keep the pnpm version in sync with the "packageManager" field in
@@ -35,6 +40,13 @@ RUN npm install -g pnpm@${PNPM_VERSION} && pnpm sync-icons && pnpm typecheck && 
 # Production image, copy all the files and run next
 FROM base AS runner
 WORKDIR /app
+
+LABEL org.opencontainers.image.title="Expanse"
+LABEL org.opencontainers.image.description="IDE visual para diseñar, desplegar y monitorear Docker Compose"
+LABEL org.opencontainers.image.authors="Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>"
+LABEL org.opencontainers.image.url="https://github.com/Dinamicas-Electronicas/expanse"
+LABEL org.opencontainers.image.source="https://github.com/Dinamicas-Electronicas/expanse"
+LABEL org.opencontainers.image.licenses="MIT"
 
 # Docker CLI + Compose + Buildx are required because the app shells out to
 # `docker compose`. buildx avoids the "Docker Compose requires buildx plugin"

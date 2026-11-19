@@ -61,6 +61,18 @@ project uses [Semantic Versioning](https://semver.org/).
   their network definitions (the case that used to break) and no longer prunes
   Docker images as a side effect of the config-only test.
 
+### Documentation & attribution
+
+- README rewritten for the `Dinamicas-Electronicas/expanse` repository:
+  corrected clone/image URLs, added index, screenshots and authorship section.
+- Added `CONTRIBUTING.md` and `NOTICE`.
+- Every source file now carries the Dinámicas Electrónicas copyright header.
+  `pnpm license:headers` applies it (idempotent) and `pnpm license:check`
+  verifies it in CI and before a release.
+- `LICENSE`, `package.json` (`author`, `license`, `repository`) and the
+  copyright notice were updated to Dinámicas Electrónicas
+  <dinamicas.electronicas@gmail.com>.
+
 ## [Unreleased] — Audit: usability, stability and security
 
 See `docs/SDD.md` for the full report, threat model and roadmap.

@@ -2,6 +2,25 @@
   "name": "next-expanse",
   "version": "1.1.5",
   "private": true,
+  "description": "Expanse — IDE visual para diseñar, desplegar y monitorear Docker Compose.",
+  "author": "Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/Dinamicas-Electronicas/expanse",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dinamicas-Electronicas/expanse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Dinamicas-Electronicas/expanse/issues"
+  },
+  "keywords": [
+    "docker",
+    "docker-compose",
+    "nextjs",
+    "visual-editor",
+    "devops",
+    "self-hosted"
+  ],
   "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "next dev --turbopack",
@@ -11,6 +30,8 @@
     "lint": "eslint .",
     "sync-icons": "node scripts/sync-icons.mjs",
     "sanitize-library": "node scripts/sanitize-library.mjs",
+    "license:headers": "node scripts/add-license-header.mjs",
+    "license:check": "node scripts/add-license-header.mjs --check",
     "generate-secrets": "node scripts/generate-secrets.mjs",
     "test": "vitest run",
     "test:docker": "RUN_DOCKER_SMOKE=true vitest run tests/integration/dockerTemplates.integration.test.ts",

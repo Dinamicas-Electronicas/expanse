@@ -1,0 +1,23 @@
+Expanse — IDE visual de Docker Compose
+======================================
+
+Copyright (c) 2026 Dinámicas Electrónicas
+Contacto: dinamicas.electronicas@gmail.com
+GitHub:   https://github.com/Dinamicas-Electronicas
+
+Este producto incluye software desarrollado por Dinámicas Electrónicas y se
+distribuye bajo la licencia MIT incluida en el archivo LICENSE de este
+repositorio.
+
+Los archivos fuente incluyen un aviso de autoría con el siguiente formato:
+
+    Expanse — IDE visual de Docker Compose
+    Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+    Licencia MIT — consulta el archivo LICENSE en la raíz del proyecto.
+
+Al redistribuir este software, o una parte sustancial de él, conserva este
+aviso y el texto completo de la licencia.
+
+Los nombres, logotipos y marcas de terceros (Docker, Next.js, PostgreSQL,
+WordPress, etc.) pertenecen a sus respectivos propietarios y se usan únicamente
+con fines descriptivos.

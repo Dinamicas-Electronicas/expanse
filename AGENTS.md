@@ -9,6 +9,8 @@
 - `pnpm test` — Vitest unit tests (config in `vitest.config.mts`, tests in `tests/`)
 - `pnpm test:docker` — runs the Docker template config/smoke integration test
 - `pnpm audit` — fails on high/critical advisories (`pnpm audit --audit-level=high`)
+- `pnpm license:headers` — adds the Dinámicas Electrónicas copyright header (idempotent)
+- `pnpm license:check` — fails if a source file is missing the copyright header (runs in CI)
 - `pnpm smoke` — smoke test against a running instance (containers, routes, APIs, headers)
 - Audit report and threat model: `docs/SDD.md`
 
