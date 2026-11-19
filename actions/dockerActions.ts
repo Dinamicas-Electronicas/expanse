@@ -19,6 +19,7 @@ import YAML from 'yaml';
 import { ActionError, assertManagedProject, requireAdmin, requireCompose, requireUser } from "@/lib/authorization";
 import { validateComposePolicy } from "@/lib/composePolicy";
 import { recordAuditEvent } from "@/lib/auditLog";
+import { maxComposeBytes, maxServicesPerCompose } from "@/lib/limits";
 import { formatPort, parsePortEntry } from "@/lib/ports";
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
@@ -56,6 +57,7 @@ function policyOptions(session?: { role: 'admin' | 'user' }) {
         allowHostMounts: hostAccess && isAdmin,
         allowBuild: process.env.ALLOW_COMPOSE_BUILD === 'true' && isAdmin,
         allowDockerSocket: hostAccess && isAdmin,
+        maxServices: maxServicesPerCompose(),
     };
 }
 
@@ -228,6 +230,10 @@ async function runComposeInternal(
     const tempDir = composeWorkDir(id);
     await fs.mkdir(tempDir, { recursive: true });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
+
+    if (yamlContent.length > maxComposeBytes()) {
+        return { success: false, code: 'COMPOSE_TOO_LARGE', error: 'The compose file is too large' };
+    }
 
     let parsed: any;
     try {
@@ -406,6 +412,10 @@ async function restartComposeInternal(composeId: string, yamlContent: string) {
     const tempDir = composeWorkDir(id);
     await fs.mkdir(tempDir, { recursive: true });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
+
+    if (yamlContent.length > maxComposeBytes()) {
+        return { success: false, code: 'COMPOSE_TOO_LARGE', error: 'The compose file is too large' };
+    }
 
     let parsed: any;
     try {

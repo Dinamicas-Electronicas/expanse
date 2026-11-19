@@ -33,6 +33,8 @@ services:
       start_period: 40s
     restart: unless-stopped
     stop_grace_period: 30s
+    cpus: ${APP_CPUS:-2.0}
+    mem_limit: ${APP_MEM_LIMIT:-2g}
     logging:
       driver: json-file
       options:
@@ -61,6 +63,8 @@ services:
       - expanse-net
     restart: unless-stopped
     stop_grace_period: 20s
+    cpus: ${DB_CPUS:-1.0}
+    mem_limit: ${DB_MEM_LIMIT:-1g}
     logging:
       driver: json-file
       options:

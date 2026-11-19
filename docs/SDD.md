@@ -124,13 +124,15 @@ límites de recursos, socket proxy).
 | Sesiones | SEC-28 | `logoutEverywhere` incrementa `sessionVersion` y revoca todos los JWT; botón en Settings → Account. |
 | Shares | SEC-30 | Caducidad (`SHARE_TTL_DAYS`, 30 días por defecto; `0` = nunca); shares expirados rechazados en visor, `/api/compose` y `/api/export/png`; re-compartir refresca la fecha. |
 | Retención | STB-15 | Limpieza diaria de PNG exportados y `/tmp/expanse-*` según `EXPORT_RETENTION_DAYS`/`TMP_RETENTION_DAYS`. |
+| Cuotas y límites | STB-15 | `MAX_COMPOSES_PER_USER` (50), `MAX_SERVICES_PER_COMPOSE` (50), `MAX_COMPOSE_BYTES` (1 MB) y `MAX_SCREENSHOT_CHARS` (4 MB); límites de CPU/memoria para app y Mongo en compose. |
+| Operación | ARC-06 | `docs/operations.md`: backup/restore, retención, migraciones, rotación de secretos y respuesta a incidentes. |
 
 **Verificación del ciclo 5**
 
 ```text
 pnpm typecheck   ✅
 pnpm lint        ✅ 0 errores (3 warnings preexistentes)
-pnpm test        ✅ 20 archivos, 119 tests OK, 2 skipped
+pnpm test        ✅ 21 archivos, 121 tests OK, 2 skipped
 pnpm build       ✅ standalone
 ```
 
@@ -147,7 +149,7 @@ accesibilidad y E2E del bloque P1.
 ```bash
 pnpm typecheck          # OK (0 errores)
 pnpm lint               # OK (0 errores, 3 warnings de react-refresh)
-pnpm test               # 20 archivos, 119 tests OK, 2 skipped
+pnpm test               # 21 archivos, 121 tests OK, 2 skipped
 pnpm audit --audit-level=high  # 0 advisories
 ```
 

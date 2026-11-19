@@ -22,6 +22,14 @@ project uses [Semantic Versioning](https://semver.org/).
   `TMP_RETENTION_DAYS` (7).
 - New env vars documented: `SHARE_TTL_DAYS`, `EXPORT_RETENTION_DAYS`,
   `TMP_RETENTION_DAYS`.
+- **Quotas and size limits:** `MAX_COMPOSES_PER_USER` (50), `MAX_SERVICES_PER_COMPOSE`
+  (50), `MAX_COMPOSE_BYTES` (1 MB) and `MAX_SCREENSHOT_CHARS` (4 MB). Oversized
+  screenshots are skipped without failing the save.
+- **Resource limits:** the reference compose caps the app (`APP_CPUS`/`APP_MEM_LIMIT`,
+  2 CPU/2 GB) and MongoDB (`DB_CPUS`/`DB_MEM_LIMIT`, 1 CPU/1 GB).
+- **Operations runbook:** new `docs/operations.md` with `mongodump`/`mongorestore`,
+  retention, migrations (`email` lowercase, `sessionVersion`, legacy shares), secret
+  rotation and incident response.
 
 ### Stability & performance (P1 cycle)
 

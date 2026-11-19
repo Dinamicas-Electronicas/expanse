@@ -249,6 +249,10 @@ allá de `docker compose`).
 | `SHARE_TTL_DAYS` | No | Caducidad de los enlaces compartidos en días (`0` = nunca). Por defecto 30. |
 | `EXPORT_RETENTION_DAYS` | No | Días que se conservan los PNG exportados. Por defecto 7. |
 | `TMP_RETENTION_DAYS` | No | Días que se conservan los directorios `/tmp/expanse-*`. Por defecto 7. |
+| `MAX_COMPOSES_PER_USER` | No | Cuota de proyectos por cuenta. Por defecto 50. |
+| `MAX_SERVICES_PER_COMPOSE` | No | Máximo de servicios por Compose. Por defecto 50. |
+| `APP_CPUS` / `APP_MEM_LIMIT` | No | Límites del contenedor de la app (`2.0` / `2g`). |
+| `DB_CPUS` / `DB_MEM_LIMIT` | No | Límites del MongoDB del stack (`1.0` / `1g`). |
 
 > **Roles:** el primer usuario creado es `admin`. Las operaciones de host (borrar
 > contenedores/volúmenes ajenos, ejecutar comandos, gestionar proyectos que no empiezan por
@@ -396,6 +400,7 @@ messages/            Catálogos en.json / es.json
 tests/               Vitest (unitarios e integración)
 scripts/             sync-icons, sanitize-library, secretos, smoke, licencias
 docs/SDD.md          Auditoría, modelo de amenazas y backlog
+docs/operations.md   Backup, restauración, migraciones e incidentes
 ```
 
 ---
@@ -465,9 +470,9 @@ Notas:
 
 ## ✅ Calidad y tests
 
-- **Vitest** con jsdom: 20 archivos y 121 casos (119 activos) que cubren validación,
+- **Vitest** con jsdom: 21 archivos y 123 casos (121 activos) que cubren validación,
   sesión, rate limit, ejecución Docker, generación de Compose/HA, plantillas, stores,
-  política de Compose, autorización de proyectos, imágenes, puertos y caducidad de shares.
+  política de Compose, autorización de proyectos, imágenes, puertos, shares y límites.
 - Tests de integración que renderizan cada plantilla y la validan con la CLI real de
   Compose (se omiten si Docker no está disponible).
 - CI en GitHub Actions: `lint`, `typecheck`, cabeceras de licencia, tests y `pnpm audit`.
@@ -488,6 +493,7 @@ una cuenta comprometida equivale a acceso al host. Antes de exponerlo a Internet
 - Restringe el registro (`DISABLE_SIGNUP=true`) o el acceso por red/VPN.
 - No publiques el puerto de MongoDB.
 - Revisa el modelo de amenazas completo en [`docs/SDD.md`](docs/SDD.md).
+- Backup, restauración, migraciones y rotación de secretos: [`docs/operations.md`](docs/operations.md).
 
 Medidas implementadas:
 

@@ -26,6 +26,7 @@ import { clientKey, rateLimit } from "@/lib/rateLimit";
 import { createUserRecord } from "@/lib/users";
 import { isValidObjectId } from "@/lib/validation";
 import { recordAuditEvent } from "@/lib/auditLog";
+import { maxComposesPerUser, maxScreenshotChars } from "@/lib/limits";
 import {
     emailSchema,
     loginCredentialsSchema,
@@ -183,6 +184,12 @@ export const registerCompose = async (
         }
         result = objectId.toString();
     } else {
+        const limit = maxComposesPerUser();
+        const count = await collection.countDocuments({ userId });
+        if (count >= limit) {
+            throw new Error(`You have reached the maximum number of projects (${limit}).`);
+        }
+
         const r = await collection.insertOne({
             userId,
             data: compose,
@@ -195,20 +202,24 @@ export const registerCompose = async (
 
     if (result) {
         if (imageBase64) {
-            try {
-                const { createHash } = await import("crypto");
-                const { promises: fs } = await import("fs");
-                const path = await import("path");
-                const pngBuffer = await processAndSaveClientExport(result, imageBase64);
-                const dataString = JSON.stringify(compose) + JSON.stringify(metadata);
-                const checksum = createHash('sha256').update(dataString).digest('hex').substring(0, 16);
-                const filename = `playground-${checksum}.png`;
-                const filepath = path.join(process.cwd(), 'public', 'exports', filename);
-                const exportsDir = path.dirname(filepath);
-                await fs.mkdir(exportsDir, { recursive: true });
-                await fs.writeFile(filepath, pngBuffer);
-            } catch (error) {
-                console.error("Failed to save client-side thumbnail:", error);
+            if (imageBase64.length > maxScreenshotChars()) {
+                console.warn('[compose] Screenshot too large; saving without thumbnail');
+            } else {
+                try {
+                    const { createHash } = await import("crypto");
+                    const { promises: fs } = await import("fs");
+                    const path = await import("path");
+                    const pngBuffer = await processAndSaveClientExport(result, imageBase64);
+                    const dataString = JSON.stringify(compose) + JSON.stringify(metadata);
+                    const checksum = createHash('sha256').update(dataString).digest('hex').substring(0, 16);
+                    const filename = `playground-${checksum}.png`;
+                    const filepath = path.join(process.cwd(), 'public', 'exports', filename);
+                    const exportsDir = path.dirname(filepath);
+                    await fs.mkdir(exportsDir, { recursive: true });
+                    await fs.writeFile(filepath, pngBuffer);
+                } catch (error) {
+                    console.error("Failed to save client-side thumbnail:", error);
+                }
             }
         }
         return { id: result, updatedAt };

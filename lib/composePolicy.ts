@@ -24,6 +24,8 @@ type PolicyOptions = {
     allowBuild?: boolean;
     /** Allows mounting the Docker socket (admin opt-in; equivalent to root). */
     allowDockerSocket?: boolean;
+    /** Maximum number of services in the document. */
+    maxServices?: number;
 };
 
 const SENSITIVE_PATHS = [
@@ -134,8 +136,9 @@ export function validateComposePolicy(doc: unknown, options: PolicyOptions = {})
     if (serviceNames.length === 0) {
         return violation('COMPOSE_POLICY_INVALID', 'services', 'Compose must define at least one service');
     }
-    if (serviceNames.length > 50) {
-        return violation('COMPOSE_POLICY_TOO_LARGE', 'services', 'Too many services (max 50)');
+    const maxServices = options.maxServices ?? 50;
+    if (serviceNames.length > maxServices) {
+        return violation('COMPOSE_POLICY_TOO_LARGE', 'services', `Too many services (max ${maxServices})`);
     }
 
     for (const [name, value] of Object.entries<any>(services)) {
