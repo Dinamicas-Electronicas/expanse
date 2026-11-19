@@ -60,3 +60,61 @@ project uses [Semantic Versioning](https://semver.org/).
 - `tests/integration/dockerTemplates.integration.test.ts` renders stacks with
   their network definitions (the case that used to break) and no longer prunes
   Docker images as a side effect of the config-only test.
+
+## [Unreleased] — Audit: usability, stability and security
+
+See `docs/SDD.md` for the full report, threat model and roadmap.
+
+### Security (critical)
+
+- Fixed an **account takeover** in the `createOrLoginUser` Server Action:
+  a client-supplied `external` flag skipped password verification. OAuth now
+  uses `lib/oauth.ts`, which is not a Server Action.
+- Fixed **unauthenticated access to any compose** through `getComposeByIdPublic`
+  (it exposed services and environment secrets). It now requires a session and
+  ownership.
+- Enforced **server-side registration validation** (email, 8–100 char password,
+  accepted terms) and added rate limiting to login, signup, password reset,
+  API token and the CLI Basic-Auth endpoint.
+- Session cookies now set `SameSite=Lax` and `Secure` automatically when `URL`
+  is HTTPS (`lib/session.ts`).
+- Fixed IDOR in `shareCompose` and in every HA action (failover, backup,
+  restore, pool metrics/config): all queries are scoped by `userId`.
+- Added `ensureAuth()` to `getLocalSystemInfo` / `saveRemoteNodeConfig` (they
+  were callable anonymously).
+- Removed secrets from logs (GitHub OAuth token, password-reset URL/code).
+- Fixed a middleware bypass through unsupported locales (`/fr/dashboard`):
+  locales are validated and `/deploy` is now protected.
+- Added security headers (nosniff, frame options, referrer policy,
+  permissions policy, COOP, conditional HSTS).
+- Hardened `/api/export/png` (wrong database, ObjectId validation, public
+  shares only, generic errors), `/api/compose` (400 on invalid ids) and the
+  logos API (allowlist + path containment).
+- Added MongoDB indexes: unique `users.email`, `composes.userId`,
+  `shares.*`, plus TTL indexes for `reset_code` and `csrf_token`.
+
+### Usability
+
+- Fixed the dashboard crash (`ReferenceError`/TDZ) that redirected users with
+  projects to `/login`.
+- Fixed the Save button showing the sign-up dialog to already authenticated
+  users; the playground now detects the session and enables saving/auto-save.
+- Added localized `error.tsx` / `not-found.tsx`, and a proper "shared project
+  not found" state without leaking internal error messages.
+- Terms acceptance is now enforced in the embedded sign-up form.
+
+### Stability
+
+- Debounced saves capture the project id and are cancelled when switching
+  projects, preventing cross-project overwrites.
+- Server Action body limit raised to 4 MB so saves with large canvas
+  screenshots no longer fail.
+- `generateHAComposeAction` reads `doc.data` instead of the non-existent
+  `doc.compose`.
+- Idempotent index bootstrap at startup (TTL cleanup included).
+
+### Tests
+
+- `tests/actions/auth.test.ts` (account-takeover regression),
+  `tests/lib/session.test.ts`, `tests/lib/rateLimit.test.ts`,
+  `tests/lib/validation.test.ts`.

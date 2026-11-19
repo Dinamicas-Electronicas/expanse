@@ -20,14 +20,29 @@ export async function middleware(req: NextRequest) {
     const secretKey = process.env.SECRET_KEY;
     if (!secretKey) {
         console.error("SECRET_KEY environment variable is not configured.");
-        return NextResponse.redirect(new URL("/", req.url));
+        // Do not redirect: redirecting to "/" would loop through this middleware.
+        return new NextResponse("Server misconfigured: SECRET_KEY is not set", { status: 500 });
     }
 
     // 1. Handle locale routing first
     const intlResponse = intlMiddleware(req);
 
-    // 2. Extract locale from pathname
+    // 2. Extract locale from pathname and reject unsupported prefixes.
+    //    Without this check any first segment ("/fr/dashboard") was treated as
+    //    a locale, bypassing the route matcher and the auth redirects.
     const { pathname } = req.nextUrl;
+    const firstSegment = pathname.split('/').filter(Boolean)[0];
+
+    if (!firstSegment) {
+        return intlResponse;
+    }
+
+    if (!(routing.locales as readonly string[]).includes(firstSegment)) {
+        const url = req.nextUrl.clone();
+        url.pathname = `/${routing.defaultLocale}${pathname}`;
+        return NextResponse.redirect(url);
+    }
+
     const localeMatch = pathname.match(new RegExp(`^/(${routing.locales.join('|')})`));
     const locale = localeMatch ? localeMatch[1] : routing.defaultLocale;
 
@@ -37,7 +52,11 @@ export async function middleware(req: NextRequest) {
     // 4. Protected routes: redirect to home if not authenticated
     const pathWithoutLocale = localeMatch ? pathname.slice(localeMatch[0].length) || '/' : pathname;
 
-    if (pathWithoutLocale.startsWith("/dashboard") || pathWithoutLocale.startsWith("/playground")) {
+    if (
+        pathWithoutLocale.startsWith("/dashboard") ||
+        pathWithoutLocale.startsWith("/playground") ||
+        pathWithoutLocale.startsWith("/deploy")
+    ) {
         const valid = await verifyToken(rawToken, secretKey);
         if (!valid) {
             const response = NextResponse.redirect(new URL(`/${locale}`, req.url));
@@ -61,5 +80,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-    matcher: ['/', '/(en|es)/:path*', '/dashboard/:path*', '/playground/:path*', '/deploy/:path*', '/login/:path*', '/signin/:path*', '/forgotPassword/:path*'],
+    // Everything except API routes, Next internals and static files.
+    matcher: ['/((?!api|_next|_vercel|.*\\..*).*)'],
 };

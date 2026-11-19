@@ -28,6 +28,7 @@ export default function EmbedSignin({ redirectToPlayGround = false }: { redirect
 
     const [password, setPassword] = useState("")
     const [email, setEmail] = useState("")
+    const [termsAccepted, setTermsAccepted] = useState(false)
 
     const getPlaygroundData = () => {
         if (!redirectToPlayGround) return JSON.stringify({})
@@ -41,8 +42,16 @@ export default function EmbedSignin({ redirectToPlayGround = false }: { redirect
     async function handleRegister(e: React.FormEvent) {
         e.preventDefault()
         const data = getPlaygroundData()
-        const registerPromise = registerUser(email, password, "", true, data)
-            .then(result => (result === true ? "" : result));
+        if (!termsAccepted) {
+            toast.error(t('termsRequired'))
+            return
+        }
+        const registerPromise = registerUser(email, password, "", termsAccepted, data).then(result => {
+            if (!result.ok) {
+                throw new Error(result.error);
+            }
+            return result.data;
+        });
         toast.promise(registerPromise, {
             success: (data: string) => {
                 setSaveState(false)
@@ -108,7 +117,13 @@ export default function EmbedSignin({ redirectToPlayGround = false }: { redirect
                 </div>
                 {mode === "register" && (
                     <div className="flex flex-row items-center gap-3">
-                        <Checkbox required id="terms" name="terms" />
+                        <Checkbox
+                            required
+                            id="terms"
+                            name="terms"
+                            checked={termsAccepted}
+                            onCheckedChange={(value) => setTermsAccepted(value === true)}
+                        />
                         <label
                             htmlFor="terms"
                             className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"

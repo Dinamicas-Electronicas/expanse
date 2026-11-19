@@ -14,11 +14,25 @@ export default async function AsyncReadOnlyPlayground({shareId,options}:{shareId
     }
 
     const compose = await getComposeByShareId(shareId)
+    const sharedCompose = compose?.data?.[0]
+
+    if (!sharedCompose) {
+        return (
+            <div {...options} className={`${options?.className ?? ''} flex items-center justify-center`}>
+                <div className="flex flex-col gap-2 items-center p-6 text-center">
+                    <p className="text-lg font-bold">Shared project not found</p>
+                    <p className="text-sm text-slate-400">
+                        This link is invalid or the share is no longer public.
+                    </p>
+                </div>
+            </div>
+        )
+    }
 
     return(
         <div {...options}>
             <ReactFlowProvider>
-                <ReadOnlyPlayGround compose={compose?.data[0].data} positionMap={compose?.data[0].metadata} />
+                <ReadOnlyPlayGround compose={sharedCompose.data} positionMap={sharedCompose.metadata} />
             </ReactFlowProvider>
         </div>
     )

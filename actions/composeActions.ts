@@ -4,6 +4,7 @@ import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
 import { ensureAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { isValidObjectId } from "@/lib/validation";
 
 const SITE_URL = process.env.URL || '';
 if (!SITE_URL) {
@@ -12,13 +13,24 @@ if (!SITE_URL) {
 
 export async function shareCompose(composeId: string) {
     const payload = await ensureAuth();
+    if (!isValidObjectId(composeId)) {
+        throw new Error("Invalid compose id");
+    }
+
     const db = await getDb();
     const shares = db.collection("shares");
+    const userId = new ObjectId(payload.userId as string);
+
+    // Only the owner can publish a compose.
+    const owned = await db.collection("composes").findOne({ _id: new ObjectId(composeId), userId });
+    if (!owned) {
+        throw new Error("Compose not found");
+    }
 
     // Check if a share already exists for the given composeId
     const existingShare = await shares.findOne({
         composeId: new ObjectId(composeId),
-        userId: new ObjectId(payload.userId as string),
+        userId,
     });
 
     revalidatePath("/dashboard/shares");
@@ -31,7 +43,7 @@ export async function shareCompose(composeId: string) {
         access: "public",
         composeId: new ObjectId(composeId),
         createdAt: new Date().getTime(),
-        userId: new ObjectId(payload.userId as string),
+        userId,
     });
 
     if (!insert.insertedId) {
@@ -42,12 +54,17 @@ export async function shareCompose(composeId: string) {
 }
 
 export const getComposeByShareId = async (shareId: string) => {
+    if (!isValidObjectId(shareId)) {
+        return undefined;
+    }
+
     const db = await getDb();
     const collection = db.collection("shares");
 
     try {
         const compose = await collection.aggregate([
-            { $match: { _id: new ObjectId(shareId) } },
+            // Public shares are the only ones exposed by this loader.
+            { $match: { _id: new ObjectId(shareId), access: "public" } },
             {
                 $lookup: {
                     from: "composes",
@@ -106,6 +123,9 @@ export const getAllMyShares = async () => {
 
 export const deleteShareById = async (shareId: string) => {
     const payload = await ensureAuth();
+    if (!isValidObjectId(shareId)) {
+        throw new Error("Invalid share id");
+    }
     const db = await getDb();
     const collection = db.collection("shares");
 

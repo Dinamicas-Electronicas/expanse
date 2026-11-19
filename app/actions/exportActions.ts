@@ -116,7 +116,7 @@ export async function exportPlaygroundAsPNGToFile(
     const client = await mongodb.getMongoClient();
 
     try {
-        const db = client.db('compose_craft');
+        const db = client.db(mongodb.DB_NAME);
         const collection = db.collection('composes');
         const { ObjectId } = await import('bson');
 

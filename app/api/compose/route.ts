@@ -1,32 +1,39 @@
-import {NextResponse} from "next/server";
-import {getComposeByShareId} from "@/actions/composeActions";
-import {Translator} from "expanse-docker-lib";
+import { NextResponse } from "next/server";
+import { getComposeByShareId } from "@/actions/composeActions";
+import { Translator } from "expanse-docker-lib";
 import YAML from "yaml";
-import {jwtVerify} from "jose";
-import {registerComposeWithoutMetadata} from "@/actions/userActions";
-import {ObjectId} from "bson";
+import { jwtVerify } from "jose";
+import { registerComposeWithoutMetadata } from "@/actions/userActions";
+import { ObjectId } from "bson";
 
 export async function GET(req: Request) {
     const id = new URL(req.url).searchParams.get("id");
 
-    if (id) {
+    if (!id) {
+        return NextResponse.json({ error: "ID not found" }, { status: 400 });
+    }
+
+    if (!/^[a-f0-9]{24}$/i.test(id)) {
+        return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
+    }
+
+    try {
         const compose = await getComposeByShareId(id);
 
-        if (compose?.data) {
-
-            const c = Translator.fromDict(compose.data[0].data)
-            const t = new Translator(c)
-            const blob = new Blob([YAML.stringify(t.toDict())], { type: 'text/yaml' });
-            const headers = new Headers();
-            headers.set("Content-Type", "application/x-yaml");
-
-
-            return new NextResponse(blob, { status: 200, statusText: "OK", headers });
-        } else {
+        if (!compose?.data?.length) {
             return NextResponse.json({ error: "Compose data not found" }, { status: 404 });
         }
-    } else {
-        return NextResponse.json({ error: "ID not found" }, { status: 400 });
+
+        const c = Translator.fromDict(compose.data[0].data)
+        const t = new Translator(c)
+        const headers = new Headers();
+        headers.set("Content-Type", "application/x-yaml");
+        headers.set("Content-Disposition", "attachment; filename=\"docker-compose.yaml\"");
+
+        return new NextResponse(YAML.stringify(t.toDict()), { status: 200, headers });
+    } catch (error) {
+        console.error("Compose export error:", error);
+        return NextResponse.json({ error: "Failed to export compose" }, { status: 500 });
     }
 }
 

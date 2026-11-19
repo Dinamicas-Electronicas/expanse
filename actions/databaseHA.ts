@@ -322,18 +322,19 @@ export async function generateHAComposeAction(
     haConfig: DatabaseHAConfig,
     dbCredentials: { dbName: string; dbUser: string; dbPassword: string }
 ): Promise<{ success: boolean; yaml?: string; configs?: Record<string, string>; error?: string }> {
-    await ensureAuth();
+    const payload = await ensureAuth();
+    const ownerId = new ObjectId(payload.userId as string);
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
-        const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+        const doc = await collection.findOne({ _id: new ObjectId(composeId), userId: ownerId });
         
         if (!doc) {
             return { success: false, error: 'Compose not found' };
         }
 
-        const baseCompose = doc.compose; // Stored compose object
+        const baseCompose = doc.data; // Composes are stored in `data`
         
         // Generate HA compose
         const haCompose = generateHACompose({
@@ -360,12 +361,13 @@ export async function generateHAComposeAction(
  * Get HA status for a deployed compose
  */
 export async function getHAStatus(composeId: string): Promise<HAStatusResponse | { error: string }> {
-    await ensureAuth();
+    const payload = await ensureAuth();
+    const ownerId = new ObjectId(payload.userId as string);
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
-        const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+        const doc = await collection.findOne({ _id: new ObjectId(composeId), userId: ownerId });
         
         if (!doc) {
             return { error: 'Compose not found' };
@@ -494,12 +496,13 @@ export async function simulateFailover(
     composeId: string, 
     targetReplica?: string
 ): Promise<FailoverResult> {
-    await ensureAuth();
+    const payload = await ensureAuth();
+    const ownerId = new ObjectId(payload.userId as string);
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
-        const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+        const doc = await collection.findOne({ _id: new ObjectId(composeId), userId: ownerId });
         
         if (!doc) {
             return { success: false, error: 'Compose not found' };
@@ -561,7 +564,7 @@ export async function simulateFailover(
 
             // Record failover event
             await collection.updateOne(
-                { _id: new ObjectId(composeId) },
+                { _id: new ObjectId(composeId), userId: ownerId },
                 { 
                     $set: { 
                         'metadata.lastFailover': {
@@ -603,12 +606,13 @@ export async function simulateFailover(
  * Trigger manual backup
  */
 export async function triggerBackup(composeId: string): Promise<BackupResult> {
-    await ensureAuth();
+    const payload = await ensureAuth();
+    const ownerId = new ObjectId(payload.userId as string);
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
-        const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+        const doc = await collection.findOne({ _id: new ObjectId(composeId), userId: ownerId });
         
         if (!doc) {
             return { success: false, error: 'Compose not found' };
@@ -647,7 +651,7 @@ export async function triggerBackup(composeId: string): Promise<BackupResult> {
             };
 
             await collection.updateOne(
-                { _id: new ObjectId(composeId) },
+                { _id: new ObjectId(composeId), userId: ownerId },
                 { $push: { 'metadata.backups': backupRecord } as any }
             );
 
@@ -674,12 +678,13 @@ export async function triggerBackup(composeId: string): Promise<BackupResult> {
  * List backups for a compose
  */
 export async function listBackups(composeId: string): Promise<BackupInfo[] | { error: string }> {
-    await ensureAuth();
+    const payload = await ensureAuth();
+    const ownerId = new ObjectId(payload.userId as string);
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
-        const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+        const doc = await collection.findOne({ _id: new ObjectId(composeId), userId: ownerId });
         
         if (!doc) {
             return { error: 'Compose not found' };
@@ -696,12 +701,13 @@ export async function listBackups(composeId: string): Promise<BackupInfo[] | { e
  * Restore from backup
  */
 export async function restoreBackup(composeId: string, backupId: string): Promise<RestoreResult> {
-    await ensureAuth();
+    const payload = await ensureAuth();
+    const ownerId = new ObjectId(payload.userId as string);
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
-        const doc = await collection.findOne({ _id: new ObjectId(composeId) });
+        const doc = await collection.findOne({ _id: new ObjectId(composeId), userId: ownerId });
         
         if (!doc) {
             return { success: false, error: 'Compose not found' };
@@ -750,10 +756,19 @@ export async function restoreBackup(composeId: string, backupId: string): Promis
  * Get pool metrics from PgBouncer
  */
 export async function getPoolMetrics(composeId: string): Promise<PoolMetrics | { error: string }> {
-    await ensureAuth();
+    const payload = await ensureAuth();
 
     try {
         const id = assertComposeId(composeId);
+        const db = await getDb();
+        const owned = await db.collection('composes').findOne({
+            _id: new ObjectId(id),
+            userId: new ObjectId(payload.userId as string),
+        });
+        if (!owned) {
+            return { error: 'Compose not found' };
+        }
+
         const tempDir = composeWorkDir(id);
         const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
@@ -798,16 +813,20 @@ export async function updatePoolConfig(
     composeId: string, 
     poolConfig: { poolSize?: number; maxConnections?: number; idleTimeout?: number }
 ): Promise<{ success: boolean; message?: string; error?: string }> {
-    await ensureAuth();
+    const payload = await ensureAuth();
 
     try {
         const db = await getDb();
         const collection = db.collection("composes");
         
-        await collection.updateOne(
-            { _id: new ObjectId(composeId) },
+        const result = await collection.updateOne(
+            { _id: new ObjectId(composeId), userId: new ObjectId(payload.userId as string) },
             { $set: { 'haConfig.connectionPool': { ...poolConfig } } }
         );
+
+        if (result.matchedCount === 0) {
+            return { success: false, error: 'Compose not found' };
+        }
 
         // Would need to reload PgBouncer config - requires restart
         return { success: true, message: 'Pool config updated. Restart required for changes to take effect.' };

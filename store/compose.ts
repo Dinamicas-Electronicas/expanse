@@ -32,8 +32,11 @@ interface ComposeState {
     setHAEnabled: (enabled: boolean) => void;
 }
 
-export async function save(compose: Compose) {
-    const { id: composeId, setId } = useComposeIdStore.getState();
+export async function save(compose: Compose, targetId?: string) {
+    const { id: currentId, setId } = useComposeIdStore.getState();
+    // Use the id captured when the save was scheduled: a debounced save must
+    // never write project A's data into project B after a quick navigation.
+    const composeId = targetId ?? currentId;
     const translator = new Translator(compose);
     // Capture screenshot client-side
     let imageBase64: string | undefined = undefined;
@@ -78,11 +81,18 @@ export async function save(compose: Compose) {
 
 // Debounce helper for saving
 let saveTimeout: NodeJS.Timeout | null = null;
-const debouncedSave = (compose: Compose) => {
-    if (saveTimeout) clearTimeout(saveTimeout);
+const cancelPendingSave = () => {
+    if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+    }
+};
+const debouncedSave = (compose: Compose, targetId?: string) => {
+    cancelPendingSave();
     saveTimeout = setTimeout(() => {
+        saveTimeout = null;
         toast.promise(
-            save(compose),
+            save(compose, targetId),
             {
                 loading: 'Saving...',
                 success: "Saved",
@@ -141,12 +151,14 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             if (hasChanged) {
                 set({ tick: tick + 1, isDirty: true });
                 if (!disabledSave) {
-                    debouncedSave(compose);
+                    debouncedSave(compose, useComposeIdStore.getState().id);
                 }
             }
             return hasChanged;
         },
         replaceCompose: (newCompose: Compose, options?: { disableSave?: boolean }) => {
+            // A pending save belongs to the project we are leaving.
+            cancelPendingSave();
             const { state: disabledSaveGlobal } = useDisableStateStore.getState();
             const disableSave = options?.disableSave ?? disabledSaveGlobal;
 
@@ -157,10 +169,11 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             set({ compose: newCompose, tick: get().tick + 1, isDirty: !disableSave, haConfig: null, haEnabled: false });
 
             if (!disableSave) {
-                debouncedSave(newCompose);
+                debouncedSave(newCompose, useComposeIdStore.getState().id);
             }
         },
         resetCompose: () => {
+            cancelPendingSave();
             const newCompose = new Compose({ name: generateRandomName() });
             set({
                 compose: newCompose,

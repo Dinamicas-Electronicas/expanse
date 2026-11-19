@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getGithubAccesToken } from "@/actions/github";
 import axios from "axios";
-import { createOrLoginUser } from "@/actions/userActions";
+import { loginOrRegisterOAuthUser } from "@/lib/oauth";
 import { registerUserToBrevo } from "@/lib/brevo";
 
 export async function GET(req: Request) {
@@ -18,7 +18,6 @@ export async function GET(req: Request) {
     await CSRF_collection.deleteOne({ token: state })
     try {
         const ghToken = await getGithubAccesToken(code)
-        console.log(ghToken)
         const resp = await axios.get('https://api.github.com/user', {
             headers: {
                 Authorization: `Bearer ${ghToken}`
@@ -42,10 +41,11 @@ export async function GET(req: Request) {
                 notification_email: resp?.data?.notification_email
             }
         }
-        await createOrLoginUser(resp.data.email, user)
+        // Verified provider identity: safe to create/login without a password.
+        await loginOrRegisterOAuthUser(resp.data.email, user)
     } catch (e) {
         console.error("GitHub OAuth callback error:", e)
         return NextResponse.json({ error: "Authentication failed. Please try again." }, { status: 500 })
     }
-    return NextResponse.redirect(`${process.env.URL}/dashboard`)
+    return NextResponse.redirect(new URL('/dashboard', req.url))
 }

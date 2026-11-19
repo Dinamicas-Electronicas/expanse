@@ -70,6 +70,11 @@ export default [
       'no-case-declarations': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
       '@typescript-eslint/no-require-imports': 'off',
     },
   },

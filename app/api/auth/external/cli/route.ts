@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getGithubAccesToken } from "@/actions/github";
 import axios from "axios";
-import { createOrLoginUser } from "@/actions/userActions";
+import { loginOrRegisterOAuthUser } from "@/lib/oauth";
 import { registerUserToBrevo } from "@/lib/brevo";
-import { SignJWT } from "jose";
+import { createSessionToken } from "@/lib/session";
 
 export async function GET(req: Request) {
     const state = new URL(req.url).searchParams.get("state")
@@ -20,14 +20,13 @@ export async function GET(req: Request) {
     await CSRF_collection.deleteOne({ token: state })
     try {
         const ghToken = await getGithubAccesToken(code)
-        console.log(ghToken)
         const resp = await axios.get('https://api.github.com/user', {
             headers: {
                 Authorization: `Bearer ${ghToken}`
             }
         })
         if (!resp.data.email) {
-            return NextResponse.json({ error: "You can't sign with github because we don't have acces to your github account email" }, { status: 406 })
+            return NextResponse.json({ error: "You can't sign with github because we don't have access to your github account email" }, { status: 406 })
         }
         const brevoId = await registerUserToBrevo({ email: resp.data.email })
         const user = {
@@ -44,15 +43,11 @@ export async function GET(req: Request) {
                 notification_email: resp?.data?.notification_email
             }
         }
-        const userId = await createOrLoginUser(resp.data.email, user)
-        const secretKey = process.env.SECRET_KEY
-        const token = await new SignJWT({ userId: userId, email: resp.data.email })
-            .setProtectedHeader({ alg: 'HS256' })
-            .setExpirationTime('31d') // Set token expiration to 31 days
-            .sign(new TextEncoder().encode(secretKey));
+        const userId = await loginOrRegisterOAuthUser(resp.data.email, user)
+        const token = await createSessionToken(userId, resp.data.email)
         return NextResponse.redirect(`http://localhost:5555?token=${token}`)
     } catch (e) {
-        //console.error(e)
-        return NextResponse.json({ error: e?.toString() }, { status: 500 })
+        console.error("GitHub OAuth CLI callback error:", e)
+        return NextResponse.json({ error: "Authentication failed. Please try again." }, { status: 500 })
     }
 }

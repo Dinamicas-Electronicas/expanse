@@ -83,9 +83,10 @@ function ExposedPortsSummary() {
 
 import useUIStore from "@/store/ui";
 import usePositionMap from "@/store/metadataMap";
+import useDisableStateStore from "@/store/disabled";
 
 import { useSearchParams } from "next/navigation";
-import { getComposeById } from "@/actions/userActions";
+import { getComposeById, getMyInfos } from "@/actions/userActions";
 import { reHydrateComposeIds, recreatePositionMap, recreateConnectionMap } from "@/lib/metadata";
 
 export default function PlaygroundContent() {
@@ -99,6 +100,21 @@ export default function PlaygroundContent() {
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [haDialogOpen, setHaDialogOpen] = useState(false);
     const [haConfig, setHaConfig] = useState<HaDeploymentConfig | null>(null);
+
+    // The save state defaults to "disabled" while it is unknown whether there
+    // is a session. Once the session is confirmed, enable saving/auto-save so
+    // authenticated users do not get the embedded sign-in dialog on "Save".
+    React.useEffect(() => {
+        let cancelled = false;
+        getMyInfos()
+            .then((user) => {
+                if (!cancelled && user) {
+                    useDisableStateStore.getState().setState(false);
+                }
+            })
+            .catch(() => { /* anonymous playground: keep the sign-in dialog */ });
+        return () => { cancelled = true; };
+    }, []);
 
     React.useEffect(() => {
         if (isExecuting) {

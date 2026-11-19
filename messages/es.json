@@ -41,7 +41,8 @@
     "alreadyHaveAccount": "¿Ya tienes cuenta? Inicia sesión",
     "needAccount": "¿Necesitas una cuenta? Regístrate",
     "acceptTerms": "Acepto los {terms}",
-    "termsAndConditions": "Términos y Condiciones"
+    "termsAndConditions": "Términos y Condiciones",
+    "termsRequired": "Debes aceptar los Términos y Condiciones para crear una cuenta"
   },
   "forgotPassword": {
     "passwordLost": "¿Contraseña perdida?",

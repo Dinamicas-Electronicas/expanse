@@ -21,7 +21,6 @@ function Reset() {
 
         // If reset code exists, append it to the form data
         const code = searchParams.get('code')
-        console.log(code)
         if (code) {
             formData.append('code', code);
         }

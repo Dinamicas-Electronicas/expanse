@@ -1,11 +1,13 @@
 'use server'
 
 import { networkInterfaces } from 'os';
+import { ensureAuth } from '@/lib/auth';
 
 /**
  * Detects the primary local IP address of the server
  */
 export async function getLocalSystemInfo() {
+    await ensureAuth();
     try {
         const nets = networkInterfaces();
         const results: Record<string, string[]> = {};
@@ -46,8 +48,10 @@ export async function getLocalSystemInfo() {
  * For now, we'll store them in the database associated with the user
  */
 export async function saveRemoteNodeConfig(config: { host: string; port: string; ca?: string; cert?: string; key?: string }) {
+    // Only authenticated operators may manage Docker endpoints.
+    await ensureAuth();
     // This will be implemented to allow managing external Docker endpoints
-    // For now, let's just mock the save
-    console.log("Saving remote node config:", config.host);
+    // For now, let's just mock the save (never log credentials/hosts)
+    void config;
     return { success: true, error: undefined as string | undefined };
 }

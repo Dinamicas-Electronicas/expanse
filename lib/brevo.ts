@@ -69,7 +69,8 @@ export async function updateUserList(email: string, listsToAdd: number[] = [], l
 export async function sendRecoverPassdEmail(to: string, code: string) {
     const url = `${process.env.URL}/forgotPassword/reset?code=${code}`
     if ((process.env.BREVO_DISABLED || "").toLowerCase() == "true") {
-        console.log(`BREVO deactivated reinitialise url for user ${to} is : ${url}`)
+        // Never log the reset URL: it contains a single-use password reset code.
+        console.log('[Brevo] Disabled, password reset email not sent')
         return null
     }
     try {

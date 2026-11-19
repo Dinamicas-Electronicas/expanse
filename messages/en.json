@@ -41,7 +41,8 @@
     "alreadyHaveAccount": "Already have an account? Login",
     "needAccount": "Need an account? Register",
     "acceptTerms": "I accept the {terms}",
-    "termsAndConditions": "Terms and Conditions"
+    "termsAndConditions": "Terms and Conditions",
+    "termsRequired": "You must accept the Terms and Conditions to create an account"
   },
   "forgotPassword": {
     "passwordLost": "Password lost?",

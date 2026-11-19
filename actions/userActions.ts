@@ -7,113 +7,121 @@ import bcrypt from "bcryptjs";
 import { registerUserToBrevo, sendRecoverPassdEmail, updateUserList } from "@/lib/brevo";
 import { cookies } from 'next/headers'
 import { redirect } from "next/navigation";
-import { SignJWT } from "jose";
 import { ObjectId } from "bson";
 import { composeMetadata } from "@/lib/metadata";
 import { processAndSaveClientExport } from "@/app/actions/exportActions";
 import { revalidatePath } from "next/cache";
 import { ensureAuth } from "@/lib/auth";
 import { generateRandomString, isWithinOneDay } from "@/lib/utils";
-
-/** 30-day expiry used consistently for both the JWT payload and the cookie */
-const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
-const SESSION_DURATION_STR = '30d';
+import { createSessionToken, setSessionCookie } from "@/lib/session";
+import { clientKey, rateLimit } from "@/lib/rateLimit";
+import {
+    emailSchema,
+    loginCredentialsSchema,
+    registrationSchema,
+    zodErrorMessage,
+} from "@/lib/validation";
 
 export async function createOrLoginUser(email: string, data: any): Promise<string> {
-    // Validate secret key before any DB operation
-    const secretKey = process.env.SECRET_KEY;
-    if (!secretKey) {
-        throw new Error("Server configuration error: SECRET_KEY is not set.");
+    // Never trust the client: only password-based authentication is accepted
+    // here. OAuth logins go through lib/oauth.ts, which is not a server action.
+    const parsedEmail = emailSchema.parse(email);
+    const password = typeof data?.password === 'string' ? data.password : '';
+
+    if (!password) {
+        throw new Error("Invalid email or password");
     }
 
     const db = await getDb();
     const collection = db.collection("users");
-    const userExist = await collection.findOne({ email: email });
+    const userExist = await collection.findOne({ email: parsedEmail });
 
     if (userExist) {
-        // Skip password check for OAuth users (external field is set, no password stored)
-        if (!data.external) {
-            const passwordMatch = await bcrypt.compare(data.password, userExist.password);
-            if (!passwordMatch) {
-                throw new Error("Invalid email or password");
-            }
+        if (!userExist.password) {
+            throw new Error("Invalid email or password");
+        }
+        const passwordMatch = await bcrypt.compare(password, userExist.password);
+        if (!passwordMatch) {
+            throw new Error("Invalid email or password");
         }
 
-        const token = await new SignJWT({ userId: userExist._id, email: userExist.email })
-            .setProtectedHeader({ alg: 'HS256' })
-            .setExpirationTime(SESSION_DURATION_STR)
-            .sign(new TextEncoder().encode(secretKey));
-
-        (await cookies()).set({
-            name: "token",
-            value: token,
-            httpOnly: true,
-            path: "/",
-            expires: new Date(Date.now() + SESSION_DURATION_MS),
-        });
-
+        await setSessionCookie(await createSessionToken(userExist._id.toString(), userExist.email));
         return userExist._id.toString();
     }
 
-    // New user: hash password only if provided (not OAuth)
-    if (data.password) {
-        data.password = await bcrypt.hash(data.password, 10);
-    }
+    // New user: hash the password and never store client-provided auth flags
+    const safeData: Record<string, any> = { ...(data ?? {}) };
+    delete safeData.external;
+    safeData.password = await bcrypt.hash(password, 10);
 
     // Check if this is the first user (becomes admin)
     const userCount = await collection.countDocuments();
     const isFirstUser = userCount === 0;
 
-    const result = await collection.insertOne({ 
-        email: email, 
-        ...data, 
+    const result = await collection.insertOne({
+        email: parsedEmail,
+        ...safeData,
         role: isFirstUser ? 'admin' : 'user',
-        createdAt: new Date().getTime() 
+        createdAt: new Date().getTime()
     });
 
-    if (result.insertedId) {
-        const token = await new SignJWT({ userId: result.insertedId, email: email })
-            .setProtectedHeader({ alg: 'HS256' })
-            .setExpirationTime(SESSION_DURATION_STR)
-            .sign(new TextEncoder().encode(secretKey));
-
-        (await cookies()).set({
-            name: "token",
-            value: token,
-            httpOnly: true,
-            path: "/",
-            expires: new Date(Date.now() + SESSION_DURATION_MS),
-        });
-
-        return result.insertedId.toString();
+    if (!result.insertedId) {
+        throw new Error("Could not create the account");
     }
 
-    return "";
+    await setSessionCookie(await createSessionToken(result.insertedId.toString(), parsedEmail));
+    return result.insertedId.toString();
 }
 
-export async function registerUser(email: string, password: string, company: string, terms: boolean, data: string) {
+export type RegisterResult = { ok: true; data: string } | { ok: false; error: string };
+
+export async function registerUser(email: string, password: string, company: string, terms: boolean, data: string): Promise<RegisterResult> {
     if (process.env.DISABLE_SIGNUP && process.env.DISABLE_SIGNUP.toLowerCase() !== "false") {
         console.error("Signup is disabled")
-        throw new Error("Signup is disabled")
+        return { ok: false, error: "Signup is disabled" };
     }
-    const brevoId = await registerUserToBrevo({ email: email })
-    const user = {
-        email: email,
-        password: password,
-        companyType: company,
-        termsAccepted: !!terms,
-        brevoId: brevoId
+
+    const limit = rateLimit(await clientKey('register'), 5, 60 * 60 * 1000);
+    if (!limit.ok) {
+        return {
+            ok: false,
+            error: `Too many signup attempts. Try again in ${Math.ceil(limit.retryAfterSeconds / 60)} minutes.`,
+        };
     }
-    await createOrLoginUser(user.email, user)
-    const parsedData = JSON.parse(data)
-    if (Object.keys(parsedData)?.length === 0) {
-        return ""
+
+    // Validate on the server: the browser form is not a trust boundary.
+    // Errors are returned (not thrown) so the UI can show the actual message:
+    // Next.js hides thrown Server Action messages in production.
+    const validation = registrationSchema.safeParse({
+        email,
+        password,
+        company: company || '',
+        terms,
+        data: data || '{}',
+    });
+    if (!validation.success) {
+        return { ok: false, error: zodErrorMessage(validation.error, 'Invalid registration data') };
     }
-    if (data) {
-        // Use native Buffer API instead of external Base64UrlDecoder dependency
-        return Buffer.from(JSON.stringify(parsedData)).toString('base64url')
+    const input = validation.data;
+
+    try {
+        const brevoId = await registerUserToBrevo({ email: input.email })
+        await createOrLoginUser(input.email, {
+            email: input.email,
+            password: input.password,
+            companyType: input.company,
+            termsAccepted: true,
+            brevoId,
+        });
+
+        const parsedData = JSON.parse(input.data)
+        if (Object.keys(parsedData)?.length === 0) {
+            return { ok: true, data: "" };
+        }
+        return { ok: true, data: Buffer.from(JSON.stringify(parsedData)).toString('base64url') };
+    } catch (error) {
+        return { ok: false, error: zodErrorMessage(error, 'Could not create the account') };
     }
-    return true
 }
 
 export const registerCompose = async (compose: object, metadata: composeMetadata, id?: string | undefined, imageBase64?: string) => {
@@ -212,41 +220,32 @@ export const getAllMyComposeOrderByEditDate = async () => {
 export async function loginUser(prevState: any, formData: FormData) {
     const loginSchema = zfd.formData({
         email: z.string().email(),
-        password: z.string().min(6).max(100),
+        password: z.string().min(1).max(200),
         data: z.string().optional()
     });
 
     try {
-        const secretKey = process.env.SECRET_KEY;
-        if (!secretKey) return { error: "Server configuration error." };
-
         const { email, password, data } = loginSchema.parse({
             email: formData.get('email'),
             password: formData.get('password'),
             data: formData.get('data') || undefined
         });
 
+        const limit = rateLimit(`${await clientKey('login')}:${String(email).toLowerCase()}`, 10, 10 * 60 * 1000);
+        if (!limit.ok) {
+            return { error: `Too many login attempts. Try again in ${Math.ceil(limit.retryAfterSeconds / 60)} minutes.` };
+        }
+
         const db = await getDb();
         const collection = db.collection("users");
         const user = await collection.findOne({ email: email });
 
-        if (!user) throw new Error("Invalid email or password");
+        if (!user || !user.password) throw new Error("Invalid email or password");
 
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) throw new Error("Invalid email or password");
 
-        const token = await new SignJWT({ userId: user._id, email: user.email })
-            .setProtectedHeader({ alg: 'HS256' })
-            .setExpirationTime(SESSION_DURATION_STR)
-            .sign(new TextEncoder().encode(secretKey));
-
-        (await cookies()).set({
-            name: "token",
-            value: token,
-            expires: new Date(Date.now() + SESSION_DURATION_MS),
-            httpOnly: true,
-            path: "/",
-        });
+        await setSessionCookie(await createSessionToken(user._id.toString(), user.email));
 
         if (data) {
             const parsedData = JSON.parse(data);
@@ -259,30 +258,28 @@ export async function loginUser(prevState: any, formData: FormData) {
         return { success: true };
 
     } catch (e) {
-        if (e instanceof Error) return { error: e.message };
-        return { error: "An unknown error occurred" };
+        return { error: zodErrorMessage(e, 'An unknown error occurred') };
     }
 }
 
 export async function getApiToken(email: string, password: string): Promise<string> {
-    const secretKey = process.env.SECRET_KEY;
-    if (!secretKey) throw new Error("Server configuration error.");
+    const credentials = loginCredentialsSchema.parse({ email, password });
+
+    const limit = rateLimit(`${await clientKey('api-token')}:${credentials.email}`, 10, 10 * 60 * 1000);
+    if (!limit.ok) {
+        throw new Error(`Too many login attempts. Try again in ${Math.ceil(limit.retryAfterSeconds / 60)} minutes.`);
+    }
 
     const db = await getDb();
     const collection = db.collection("users");
-    const user = await collection.findOne({ email: email });
+    const user = await collection.findOne({ email: credentials.email });
 
-    if (!user) throw new Error("Invalid email or password");
+    if (!user || !user.password) throw new Error("Invalid email or password");
 
-    const passwordMatch = await bcrypt.compare(password, user.password);
+    const passwordMatch = await bcrypt.compare(credentials.password, user.password);
     if (!passwordMatch) throw new Error("Invalid email or password");
 
-    const token = await new SignJWT({ userId: user._id, email: user.email })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setExpirationTime(SESSION_DURATION_STR)
-        .sign(new TextEncoder().encode(secretKey));
-
-    return token;
+    return createSessionToken(user._id.toString(), user.email);
 }
 
 export const getComposeById = async (composeId: string) => {
@@ -312,12 +309,21 @@ export const getComposeById = async (composeId: string) => {
     }
 };
 
+/**
+ * Compose loader used by the render/export page.
+ *
+ * Despite its historical name this must NOT be public: it used to return any
+ * compose (including environment secrets) to any caller, and server actions are
+ * reachable without authentication. It now requires a session and ownership.
+ */
 export const getComposeByIdPublic = async (composeId: string) => {
+    const payload = await ensureAuth();
     const db = await getDb();
     const collection = db.collection("composes");
+    const userId = new ObjectId(payload.userId as string);
 
     try {
-        const compose = await collection.findOne({ _id: new ObjectId(composeId) });
+        const compose = await collection.findOne({ _id: new ObjectId(composeId), userId });
         if (!compose) return undefined;
 
         return {
@@ -420,6 +426,13 @@ export async function askPasswordReset(prevState: any, formData: FormData) {
 
     try {
         const { email } = passwordAskSchema.parse({ email: formData.get('email') });
+
+        const limit = rateLimit(await clientKey('password-reset'), 5, 60 * 60 * 1000);
+        if (!limit.ok) {
+            // Same response as success: do not reveal whether the address exists.
+            return { success: true };
+        }
+
         const db = await getDb();
         const collection = db.collection("users");
         const user = await collection.findOne({ email: email });
@@ -451,18 +464,23 @@ export async function askPasswordReset(prevState: any, formData: FormData) {
 }
 
 export async function passwordReset(prevState: any, formData: FormData) {
-    const passwordResetSchema = zfd.formData({
-        password: z.string().min(6, "Password must be at least 6 characters"),
+    const resetFormSchema = zfd.formData({
+        password: z.string().min(8, "Password must be at least 8 characters"),
         password2: z.string(),
         code: z.string(),
     });
 
     try {
-        const { password, password2, code } = passwordResetSchema.parse({
+        const { password, password2, code } = resetFormSchema.parse({
             password: formData.get('password'),
             password2: formData.get('password2'),
             code: formData.get('code')
         });
+
+        const limit = rateLimit(await clientKey('password-reset-submit'), 10, 60 * 60 * 1000);
+        if (!limit.ok) {
+            return { error: 'Too many attempts. Try again later.' };
+        }
 
         if (password !== password2) throw new Error("Passwords are not the same");
 
@@ -484,7 +502,6 @@ export async function passwordReset(prevState: any, formData: FormData) {
         return { success: true };
 
     } catch (e) {
-        if (e instanceof Error) return { error: e.message };
-        return { error: "An unknown error occurred" };
+        return { error: zodErrorMessage(e, 'An unknown error occurred') };
     }
 }

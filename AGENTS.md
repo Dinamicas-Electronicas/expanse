@@ -9,6 +9,16 @@
 - `pnpm test` — Vitest unit tests (config in `vitest.config.mts`, tests in `tests/`)
 - `pnpm test:docker` — runs the Docker template config/smoke integration test
 - `pnpm audit` — fails on high/critical advisories (`pnpm audit --audit-level=high`)
+- Audit report and threat model: `docs/SDD.md`
+
+## Security Model
+- Server Actions are public endpoints: **never** export a privileged helper from a `'use server'` module. OAuth identity handling lives in `lib/oauth.ts` (not an action).
+- Every action must call `ensureAuth()`; every per-user query must filter by `userId` (compose, share, HA).
+- Use `lib/validation.ts` schemas at the server boundary; never trust client validation or client flags.
+- Sessions: `lib/session.ts` sets `HttpOnly`, `SameSite=Lax` and `Secure` when `URL` is HTTPS.
+- Rate limit auth endpoints with `lib/rateLimit.ts` (in-memory: single instance only).
+- Docker execution goes through `lib/dockerExec.ts` (`execFile`, validated ids). The container still has full Docker socket access: treat any authenticated account as host admin.
+- Indexes/TTL are created by `lib/dbIndexes.ts` from `instrumentation.ts`.
 
 ## Environment Setup
 - Requires `SECRET_KEY` env var (middleware redirect loop if missing)
