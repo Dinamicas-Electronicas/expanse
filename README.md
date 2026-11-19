@@ -4,15 +4,17 @@
 
   <h1>Expanse</h1>
 
-  <p><strong>El IDE visual profesional para Docker Compose</strong></p>
+  <p><strong>El IDE visual para Docker Compose</strong></p>
 
-  <p>Diseña tu infraestructura en un canvas, despliega con un clic y monitorea en tiempo real.<br/>
-  Sin escribir una línea de YAML.</p>
+  <p>Diseña tu infraestructura en un canvas, despliégala con un clic y monitorea<br/>
+  contenedores, logs y métricas en tiempo real. Sin escribir YAML a mano.</p>
 
   <p>
     <a href="LICENSE"><img src="https://img.shields.io/badge/licencia-MIT-blue.svg" alt="Licencia: MIT" /></a>
     <a href="https://github.com/Dinamicas-Electronicas/expanse/actions/workflows/ci.yml"><img src="https://github.com/Dinamicas-Electronicas/expanse/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+    <a href="https://github.com/Dinamicas-Electronicas/expanse/actions/workflows/docker-image.yml"><img src="https://github.com/Dinamicas-Electronicas/expanse/actions/workflows/docker-image.yml/badge.svg" alt="Docker Image" /></a>
     <img src="https://img.shields.io/badge/Next.js-15-black?logo=next.js" alt="Next.js 15" />
+    <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19" />
     <img src="https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white" alt="Docker Compose" />
     <img src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
     <img src="https://img.shields.io/badge/idiomas-ES%20%7C%20EN-9F7AEA" alt="Idiomas: Español e Inglés" />
@@ -32,14 +34,18 @@
 ## 📑 Índice
 
 - [¿Qué es Expanse?](#-qué-es-expanse)
-- [Características principales](#-características-principales)
+- [Características](#-características)
 - [Capturas](#-capturas)
-- [Primeros pasos](#-primeros-pasos)
-- [Flujo de trabajo](#-flujo-de-trabajo)
-- [Arquitectura técnica](#-arquitectura-técnica)
-- [Comparativa](#-comparativa)
-- [Desarrollo local](#-desarrollo-local)
+- [Inicio rápido](#-inicio-rápido)
+- [Configuración](#-configuración)
+- [Uso](#-uso)
+- [Rutas](#-rutas)
+- [Arquitectura](#-arquitectura)
+- [Biblioteca de servicios](#-biblioteca-de-servicios)
+- [Desarrollo](#-desarrollo)
+- [Calidad y tests](#-calidad-y-tests)
 - [Seguridad](#-seguridad)
+- [CI/CD y publicación](#-cicd-y-publicación)
 - [Contribuir](#-contribuir)
 - [Autoría y licencia](#-autoría-y-licencia)
 - [Roadmap](#-roadmap)
@@ -48,85 +54,104 @@
 
 ## 🎯 ¿Qué es Expanse?
 
-**Expanse** es una plataforma profesional que simplifica radicalmente el despliegue de
-aplicaciones containerizadas. Diseña tu infraestructura visualmente, despliégala con un clic
-y monitorea todo en tiempo real — sin escribir una sola línea de YAML.
-
-> _"Docker Compose es potente, pero su YAML es frágil y propenso a errores. Expanse lo hace trivial."_
-
-### 🎯 Público objetivo
+**Expanse** es una aplicación web autoalojada que convierte `docker-compose.yml` en un
+diagrama editable. Arrastra servicios desde una biblioteca de plantillas, conéctalos,
+configura puertos, volúmenes, variables de entorno y despliega el stack completo contra el
+Docker Engine local, todo desde el navegador.
 
 | Segmento | Beneficio principal |
 |----------|---------------------|
-| **DevOps Engineers** | Prototipado rápido de arquitecturas, reducción de errores en YAML |
-| **Startups** | Deploy de stacks completos (DB + Backend + Frontend) en minutos |
-| **Desarrolladores individuales** | Curva de aprendizaje cero para Docker |
-| **Equipos de producto** | Compartir configuraciones entre entornos |
-| **Agencias** | Gestión multi-cliente sin complejidad |
+| **DevOps / SRE** | Prototipar arquitecturas y validar Compose sin editar YAML |
+| **Startups** | Levantar stacks completos (DB + backend + frontend) en minutos |
+| **Desarrolladores** | Gestión visual de contenedores sin memorizar la CLI de Docker |
+| **Equipos** | Compartir proyectos y sus diagramas con enlaces de solo lectura |
+| **Homelab / self-hosting** | Catálogo curado de servicios listos para desplegar |
+
+> Expanse **no** sustituye a Docker: genera Compose válido y ejecuta `docker compose`
+> mediante `execFile` con argumentos validados.
 
 ---
 
-## ✨ Características principales
+## ✨ Características
 
-### 🖼️ Editor visual de drag & drop
+### 🖼️ Canvas visual (React Flow + ELK.js)
 
-Interfaz intuitiva tipo canvas donde puedes:
+- Arrastrar y soltar servicios, redes, volúmenes, bindings, variables y etiquetas.
+- Conexiones entre nodos que se traducen en `depends_on`, redes y volúmenes del Compose.
+- Auto-layout jerárquico con ELK.js (routers → aplicaciones → bases de datos).
+- Editor lateral por tipo de nodo: servicio, red, binding, volumen, entorno y etiquetas.
+- Importación y exportación de `docker-compose.yml` sin perder la disposición del canvas.
+- Guardado automático con *debounce* de 2 s; la captura del canvas se almacena con el proyecto.
 
-- **Arrastrar servicios** desde una biblioteca de 140+ plantillas
-- **Conectar visualmente** bases de datos, APIs, redes y volúmenes
-- **Ver dependencias** entre servicios representadas como flechas
-- **Auto-layout** inteligente que organiza nodos por tipología (routers → apps → databases)
-- **Importar y exportar** `docker-compose.yml` sin perder la disposición del canvas
+### 📦 Biblioteca de 142 plantillas (25 de ellas stacks)
 
-### 📦 Biblioteca de servicios enterprise
+Plantillas JSON verificadas, con imagen, puertos, variables, volúmenes y logo:
 
-Plantillas verificadas y mantenidas para las tecnologías más populares:
+| Categoría | Plantillas | Ejemplos |
+|-----------|-----------:|----------|
+| **Database** | 19 | PostgreSQL, MySQL, MongoDB, Redis, MariaDB, Cassandra, ClickHouse |
+| **AI** | 18 | Ollama, Open WebUI, Qdrant, AnythingLLM, ComfyUI, vLLM |
+| **Cloud** | 15 | Nextcloud, Seafile, OwnCloud, Cloudreve, Syncthing |
+| **Network** | 14 | Nginx Proxy Manager, Traefik, WireGuard, NetBird, Pi-hole, AdGuard Home |
+| **CMS** | 14 | WordPress, Ghost, Strapi, Directus, Drupal, Joomla |
+| **Social** | 12 | Mastodon, Pixelfed, Pleroma, Akkoma, Friendica |
+| **Monitoring** | 11 | Prometheus, Grafana, Zabbix, Netdata, Uptime Kuma |
+| **Automation** | 10 | n8n, Node-RED, Apache Airflow, Activepieces, Windmill |
+| **Development** | 9 | Gitea, Appwrite, Elixir, Go, Node.js, PHP, Python, Ruby, Rust |
+| **Messaging** | 9 | Rocket.Chat, Zulip, Mattermost, Matrix (Synapse/Dendrite), Prosody |
+| **OS** | 6 | Alpine, Debian, Ubuntu, Fedora, Rocky Linux, Amazon Linux |
+| **Web server** | 2 | Nginx, PostgREST (HA) |
+| **Utilities** | 2 | Portainer, Vaultwarden |
+| **Applications** | 1 | Media Center (Jellyfin + Arrs) |
 
-| Categoría | Servicios |
-|-----------|-----------|
-| **Databases** | PostgreSQL, MySQL, MongoDB, Redis, MariaDB, Elasticsearch |
-| **AI/ML** | Ollama, Open WebUI, Qdrant, AnythingLLM, vLLM, ComfyUI |
-| **Automation** | n8n, Node-RED, Home Assistant, ActivePieces |
-| **CMS** | WordPress, Ghost, Strapi, Directus, Drupal |
-| **Monitoring** | Prometheus, Grafana, Zabbix, Netdata, Uptime Kuma |
-| **Networking** | Nginx, Traefik, HAProxy, WireGuard, NetBird |
-| **Messaging** | Rocket.Chat, Zulip, Matrix, Mattermost |
-| **Media** | Jellyfin, Plex, Pi-hole, AdGuard |
-| **Cloud** | Nextcloud, OwnCloud, Seafile, Duplicacy |
+Listado completo y filtrable en `data/library/`; los iconos se generan con
+`pnpm sync-icons`.
 
-### 🚀 Despliegue inteligente
+Los stacks (`isStack: true`) agrupan varios servicios en un solo bloque, por ejemplo
+*WordPress (Full Stack)*, *ELK Stack*, *PLG Stack*, *Media Center*, *n8n (Full Stack)* o
+*PostgreSQL HA (Patroni)*.
 
-Un solo clic para desplegar stacks complejos. Expanse genera automáticamente:
+### 🚀 Despliegue
 
-- ✓ Healthchecks optimizados por tipo de servicio
-- ✓ Variables de entorno inyectadas según dependencias
-- ✓ Límites de CPU/memoria configurables
-- ✓ Redes y volúmenes auto-configurados
-- ✓ Resolución de conflictos de puertos con reasignación automática
+- Validación previa de puertos con reasignación automática ante colisiones (hasta 5 intentos).
+- Generación de YAML en `/tmp/expanse-<id>/docker-compose.yaml` y ejecución como
+  proyecto `expanse-project_<objectId>`.
+- Normalización de nombres de servicios, redes y volúmenes (claves válidas para Compose).
+- Inyección de healthchecks para bases de datos, condiciones `service_healthy` y límites
+  de CPU/memoria desde los metadatos del canvas.
+- Acciones por proyecto: arrancar, parar, reiniciar, estado, logs y eliminación.
 
-### 🔄 Alta disponibilidad integrada
+### 🔄 Alta disponibilidad
 
-Configura HA en segundos sin ser experto en infraestructura:
+- Diálogo de despliegue HA con réplicas (2–10), balanceador y *connection pooling*.
+- Generación de configuración de **HAProxy** (round-robin + health checks) y
+  **PgBouncer** (transaction mode) desde `lib/metadata.ts`.
+- Plantillas HA listas para usar (Patroni, InnoDB Cluster, Replica Set, Sentinel,
+  PostgREST HA) y panel de métricas HA durante la ejecución.
 
-| Componente | Tecnología | Beneficio |
-|------------|------------|-----------|
-| **Load Balancer** | HAProxy | Balanceo round-robin, health checks |
-| **Autoscaling** | Docker Compose replicas | 2–10 réplicas automáticas |
-| **Connection Pool** | PgBouncer | Transaction mode, hasta 100 conexiones |
+### 📊 Monitoreo y operación
 
-### 📊 Monitoreo en tiempo real
+- Estado de cada servicio (`running`, `exited`, `unknown`) y estado global por proyecto.
+- Métricas de CPU y memoria por contenedor; estadísticas globales del host.
+- Visor web integrado para servicios con puertos HTTP conocidos.
+- Logs en streaming con colores por servicio.
+- Terminal interactiva por contenedor con **xterm.js**.
+- Panel de sistema: proyectos, contenedores, volúmenes e imágenes; *pull* de imágenes y
+  búsqueda en Docker Hub.
 
-- **Estado de servicios**: running, exited, unknown con iconografía clara
-- **Métricas live**: CPU, memoria y disco por contenedor
-- **Logs streaming**: transmisión en vivo con colores diferenciados
-- **Terminal integrada**: xterm.js para acceso shell directo por contenedor
+### 🤝 Colaboración y datos
 
-### 🔐 Seguridad y colaboración
+- Compartir proyectos con enlace público de solo lectura y visor independiente.
+- Descarga del Compose compartido en YAML y exportación del canvas a PNG.
+- Backup completo de proyectos en JSON desde los ajustes de cuenta.
 
-- **Auth JWT** con cookies HTTP-only (expiración de 30 días)
-- **Sharing granular**: comparte configuraciones vía link de solo lectura
-- **Backup automático**: exporta e importa configuraciones
-- **Validación de puertos**: detección proactiva de conflictos
+### 🌐 Internacionalización y autenticación
+
+- **English** (predeterminado) y **Español**, con `next-intl` y rutas `/{locale}`.
+- Registro e inicio de sesión con email/contraseña (bcrypt) y sesión **JWT HS256** en
+  cookie `HttpOnly`, `SameSite=Lax`, 30 días.
+- OAuth con GitHub (opcional) y flujo de autenticación para la CLI.
+- Restablecimiento de contraseña por email (Brevo, opcional).
 
 ---
 
@@ -134,66 +159,40 @@ Configura HA en segundos sin ser experto en infraestructura:
 
 <div align="center">
   <img src="assets/demo1.png" alt="Canvas de Expanse con un stack WordPress + MariaDB desplegado" width="100%" />
-  <p><em>Canvas visual con servicios desplegados, logs en vivo y terminal integrada.</em></p>
+  <p><em>Canvas visual, panel de ejecución, logs y terminal integrada.</em></p>
 </div>
 
 ---
 
-## 🚀 Primeros pasos
+## 🚀 Inicio rápido
 
-### Requisitos previos
+### Requisitos
 
-- Docker Engine 20.10+ y Docker Compose v2 (con el plugin `buildx`)
-- pnpm 12 (solo para desarrollo local y para `pnpm generate-secrets`)
-- MongoDB 5.0+ (incluido en el stack de `docker-compose.yml`)
-- 4 GB de RAM mínimo recomendado
-- Puerto `4000` disponible
+- Docker Engine 20.10+ con Docker Compose v2 y el plugin `buildx`.
+- 4 GB de RAM recomendados.
+- Puerto `4000` libre.
+- pnpm 12 solo si vas a desarrollar o generar secretos localmente.
 
-### Instalación instantánea
+### Docker Compose (recomendado)
 
 ```bash
-# 1. Clona el repositorio
 git clone https://github.com/Dinamicas-Electronicas/expanse.git
 cd expanse
 
-# 2. Genera .env con SECRET_KEY, DB_USER y DB_PASS aleatorios
+# Genera .env con SECRET_KEY, DB_USER y DB_PASS aleatorios
 pnpm generate-secrets
 
-# 3. Construye y arranca el stack
 docker compose up -d --build
-
-# 4. Abre http://localhost:4000
 ```
+
+Abre <http://localhost:4000>.
 
 > `SECRET_KEY`, `DB_USER` y `DB_PASS` son obligatorios: `docker compose` falla de forma
-> explícita si faltan, en lugar de arrancar con credenciales por defecto.
-
-### Reconstrucción limpia y autotest
-
-```bash
-# 1. Parar el stack (conserva los volúmenes de datos)
-docker compose down --remove-orphans
-
-# 2. Borrar la imagen y los artefactos de build (no toca otros proyectos)
-docker image rm expanse:local
-docker image prune -f        # solo imágenes colgantes (<none>)
-docker builder prune -af     # caché de construcción
-
-# 3. Reconstruir desde cero y arrancar
-docker compose build --no-cache app
-docker compose up -d
-
-# 4. Verificación automática (contenedores, rutas, APIs y cabeceras)
-pnpm smoke
-```
-
-> Los volúmenes `expanse_expanse_db_data` y `expanse_expanse_exports` **no** se borran con
-> estos comandos. Para empezar de cero también en datos: `docker compose down -v`
-> (¡elimina usuarios y proyectos!).
+> explícita si faltan en lugar de arrancar con credenciales por defecto.
 
 ### Docker Run directo
 
-Requiere un MongoDB accesible:
+Requiere un MongoDB accesible y el socket de Docker:
 
 ```bash
 docker run -d \
@@ -201,170 +200,337 @@ docker run -d \
   -p 4000:3000 \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
   -e MONGODB_URI="mongodb://usuario:password@host:27017/expanse?authSource=admin" \
+  -e URL="http://localhost:4000" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   <usuario-dockerhub>/expanse:latest
 ```
 
-> La imagen multi-arquitectura (`linux/amd64` + `linux/arm64`) se publica automáticamente en
-> Docker Hub desde `main` con las credenciales `DOCKER_USERNAME` / `DOCKER_PASSWORD` del
-> repositorio.
+### Reconstrucción limpia y verificación
+
+```bash
+docker compose down --remove-orphans
+docker image rm expanse:local
+docker builder prune -af
+
+docker compose build --no-cache app
+docker compose up -d
+pnpm smoke
+```
+
+`pnpm smoke` comprueba contenedores, rutas, APIs y cabeceras de seguridad. Los volúmenes
+`expanse_db_data` y `expanse_exports` se conservan; usa `docker compose down -v` solo si
+quieres borrar también los datos.
 
 ---
 
-## 📖 Flujo de trabajo
+## ⚙️ Configuración
 
-### Fase 1 — Diseña
+Toda la configuración se pasa por variables de entorno (no se usa `.env` en runtime más
+allá de `docker compose`).
 
-1. **Abre el canvas** → clic en «+» o selecciona servicios de la biblioteca
-2. **Arrastra servicios** → PostgreSQL, Redis, tu API, Nginx
-3. **Conecta servicios** → arrastra de un nodo a otro
-4. **Configura** → clic en cualquier nodo para editar recursos
+| Variable | Obligatoria | Descripción |
+|----------|:-----------:|-------------|
+| `SECRET_KEY` | ✅ | Firma de JWT y cookies. Sin ella el middleware responde 500. |
+| `MONGODB_URI` | ✅ | Conexión a MongoDB (por defecto `mongodb://localhost:27017`). |
+| `URL` | Recomendada | URL pública. Si es `https://` activa `Secure` en la cookie y HSTS. |
+| `APP_URL` | Solo Compose | URL usada por `docker-compose.yml` para `URL`. |
+| `DB_USER` / `DB_PASS` | Solo Compose | Credenciales del MongoDB del stack. |
+| `CORE_ONLY` | No | Modo núcleo: desactiva SEO, marketing y OAuth. |
+| `DISABLE_TELEMETRY` | No | Desactiva PostHog y telemetría externa. |
+| `DISABLE_SIGNUP` | No | Cierra el registro de nuevas cuentas. |
+| `BREVO_API_KEY` / `BREVO_DISABLED` | No | Email transaccional y contactos (Brevo). |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | No | Habilita el login con GitHub. |
+| `NEXT_PUBLIC_POSTHOG_KEY` | No | Clave de analítica (si la telemetría está activa). |
+| `ENABLE_EXTERNAL_TELEMETRY` | No | Opt-in del script de terceros `opentech-ux` (por defecto `false`). |
+| `ALLOW_COMPOSE_HOST_ACCESS` | No | Permite montajes sensibles (socket Docker, `/etc`, …) en stacks desplegados. Por defecto `false`. |
+| `ALLOW_COMPOSE_BUILD` | No | Permite `build:` en los Compose desplegados. Por defecto `false`. |
+| `ALLOW_HOST_PROJECT_OPS` | No | Permite a un admin gestionar proyectos/contenedores que no son de Expanse. Por defecto `false`. |
+| `TRUST_PROXY` | No | Confía en `X-Forwarded-For` para el rate limit (pon `false` si expones la app sin proxy). |
 
-### Fase 2 — Despliega
+> **Roles:** el primer usuario creado es `admin`. Las operaciones de host (borrar
+> contenedores/volúmenes ajenos, ejecutar comandos, gestionar proyectos que no empiezan por
+> `expanse-project_`) exigen rol admin y, para recursos no gestionados, el flag explícito
+> `ALLOW_HOST_PROJECT_OPS=true`. El resto de usuarios solo opera sus propios proyectos.
 
-1. **Clic en «Run»** → se abre el diálogo de HA (opcional)
-2. **Selecciona opciones HA** → réplicas, load balancer, connection pool
-3. **Confirma** → Expanse valida puertos y despliega
-4. **Verifica** → estado «running» en verde
-
-### Fase 3 — Monitorea
-
-1. **Panel de ejecución** → estado de todos los servicios
-2. **Logs live** → clic en un servicio para ver sus logs
-3. **Terminal** → clic en el icono de terminal para un shell interactivo
-4. **Métricas HA** → panel dedicado con throughput y conexiones
+Consulta `.env.example` y [`docs/SDD.md`](docs/SDD.md) para el modelo de amenazas y la
+auditoría de seguridad.
 
 ---
 
-## 🏗️ Arquitectura técnica
+## 📖 Uso
 
-### Stack tecnológico
+### 1. Diseña
 
-| Capa | Tecnología | Versión |
-|------|------------|---------|
-| **Framework** | Next.js | 15.x |
-| **UI** | React | 19.x |
-| **Canvas** | @xyflow/react + ELK.js | 12.x / 0.9.x |
-| **State** | Zustand | 5.x |
-| **Database** | MongoDB + Mongoose | 6.x / 8.x |
-| **Auth** | JWT (jose) + bcrypt | HS256 |
-| **Styling** | Tailwind CSS + Radix UI | 3.x |
-| **Terminal** | xterm.js | 5.x |
-| **Validation** | Zod + react-hook-form | 3.x |
+1. Entra en **Dashboard → Playground** y crea un proyecto.
+2. Abre la biblioteca, busca un servicio (o un stack) y arrástralo al canvas.
+3. Conecta nodos para declarar dependencias y redes.
+4. Selecciona cualquier nodo para editar imagen, puertos, volúmenes, entorno y recursos.
+5. Usa el editor YAML (Monaco) si necesitas ajustar algo manualmente.
 
-### Diagrama de arquitectura
+### 2. Despliega
+
+1. Pulsa **Run**. Si el stack lo admite, el diálogo HA permite elegir réplicas,
+   balanceador y *pooling*.
+2. Expanse valida puertos y reasigna los que estén ocupados.
+3. Se genera el YAML, se aplican parches (nombres, healthchecks, límites) y se ejecuta
+   `docker compose up -d`.
+
+### 3. Monitorea
+
+- Panel de ejecución con el estado de cada servicio.
+- Logs en vivo y terminal por contenedor.
+- Visor web para servicios HTTP.
+- **Dashboard → System** para gestionar proyectos, contenedores, volúmenes e imágenes
+  del host.
+- **Dashboard → My Shares** para los enlaces compartidos.
+
+---
+
+## 🗺️ Rutas
+
+| Ruta | Descripción |
+|------|-------------|
+| `/{locale}` | Inicio: proyectos del usuario, estado y monitor global |
+| `/{locale}/dashboard` | Panel de proyectos dentro del layout unificado |
+| `/{locale}/dashboard/playground?id=<id>` | Editor visual de un proyecto |
+| `/{locale}/dashboard/deploys` | Enlaces compartidos del usuario |
+| `/{locale}/dashboard/settings` | Cuenta, backup JSON y seguridad |
+| `/{locale}/deploy/settings` | Gestión Docker del host (proyectos, contenedores, volúmenes, imágenes) |
+| `/{locale}/login` · `/{locale}/signin` | Inicio de sesión y registro |
+| `/{locale}/login/cli` | Autenticación para la CLI local |
+| `/{locale}/forgotPassword` | Recuperación de contraseña |
+| `/{locale}/share?id=<id>&name=<name>` | Visor de solo lectura de un proyecto compartido |
+| `/{locale}/terms` | Términos y condiciones |
+
+APIs principales: `GET /api/ping` (healthcheck), `GET /api/compose?id=` (descarga YAML),
+`POST /api/compose/machine` (importación autenticada por token), `GET /api/export/png?shareId=`,
+`GET /api/logos/library/[name]`, y los endpoints de OAuth/JWT bajo `/api/auth/`.
+
+---
+
+## 🏗️ Arquitectura
+
+### Stack
+
+| Capa | Tecnología |
+|------|------------|
+| Framework | Next.js 15 (App Router, standalone) · React 19 |
+| Canvas | `@xyflow/react` + `elkjs` |
+| Estado | Zustand (10 stores en `store/`) |
+| Base de datos | MongoDB + driver oficial (colecciones sin esquema estricto) |
+| Auth | JWT HS256 (`jose`) + `bcryptjs` |
+| UI | Tailwind CSS 3 + Radix UI + lucide-react |
+| Editor YAML | Monaco Editor |
+| Terminal | xterm.js + addon-fit |
+| Validación | Zod + react-hook-form |
+| i18n | next-intl (`en`, `es`) |
+| Compose | `expanse-docker-lib` (`Compose`, `Service`, `Translator`) |
+
+### Diagrama
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Usuario                              │
-│                    Browser (Chrome)                         │
-│              https://localhost:4000                         │
+│                        Navegador                            │
+│              http(s)://host:4000  (Next.js)                 │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ HTTPS
+                           │
 ┌──────────────────────────▼──────────────────────────────────┐
-│                    Expanse Container                        │
-│  ┌────────────────┐  ┌────────────────┐  ┌───────────────┐  │
-│  │   Next.js      │  │    MongoDB     │  │     ELK       │  │
-│  │  (App + API)   │  │   (Estado)     │  │  (Layout)     │  │
-│  └───────┬────────┘  └────────────────┘  └───────────────┘  │
-│          │                                                  │
-│          │ docker.sock                                      │
+│                    Contenedor Expanse                       │
+│  ┌────────────────┐   ┌────────────────┐   ┌─────────────┐  │
+│  │  Next.js App   │   │    MongoDB     │   │  ELK.js     │  │
+│  │  UI + Actions  │   │  (proyectos)   │   │  (layout)   │  │
+│  └───────┬────────┘   └────────────────┘   └─────────────┘  │
+│          │ docker compose (execFile)                        │
 │          ▼                                                  │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │              Docker Engine                           │   │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  │   │
-│  │  │Postgres │  │  Redis  │  │ HAProxy │  │ Tu App  │  │   │
-│  │  └─────────┘  └─────────┘  └─────────┘  └─────────┘  │   │
+│  │                    Docker Engine                     │   │
+│  │  Postgres · Redis · HAProxy · Tu aplicación · …      │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
+> El socket `/var/run/docker.sock` se monta en el contenedor. **Cualquier cuenta
+> autenticada debe considerarse con privilegios de administrador del host.**
+
 ### Modelo de datos
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│    User     │────▶│   Compose   │────▶│  Metadata   │
-├─────────────┤     ├─────────────┤     ├─────────────┤
-│ _id         │     │ _id         │     │ Ids         │
-│ email       │     │ userId      │     │ positionMap │
-│ password    │     │ data        │     │ connection  │
-│ companyType │     │ metadata    │     │ resources   │
-└─────────────┘     │ createdAt   │     └─────────────┘
-                    │ updatedAt   │
-                    └─────────────┘
-                           │
-                    ┌──────▼──────┐
-                    │   Share     │
-                    ├─────────────┤
-                    │ composeId   │
-                    │ name        │
-                    │ readOnly    │
-                    └─────────────┘
+users ──────▶ composes ──────▶ (data: Compose + metadata)
+  │                │
+  │                └──────────▶ shares (read-only, access: public | private)
+  ├──────────────▶ reset_code   (TTL)
+  └──────────────▶ csrf_token    (TTL, OAuth)
+```
+
+- `users`: email único, hash de contraseña, empresa, términos aceptados.
+- `composes`: `userId`, `data` (Compose + metadatos del canvas), timestamps.
+- `shares`: referencia al compose, nombre, tipo de acceso.
+- Índices y TTL creados al arrancar desde `lib/dbIndexes.ts` (`instrumentation.ts`).
+
+### Flujo de despliegue
+
+1. `store/compose.ts` autoguarda el proyecto en MongoDB (debounce de 2 s).
+2. El cliente llama a `runCompose()` en `actions/dockerActions.ts` (Server Action).
+3. `ensureAuth()` valida la sesión y `validateComposePorts()` resuelve colisiones.
+4. Se escribe el YAML en `/tmp/expanse-<id>/docker-compose.yaml`.
+5. `lib/dockerCompose.ts` normaliza claves, inyecta healthchecks y aplica límites.
+6. `lib/dockerExec.ts` ejecuta `docker compose up -d` con `execFile` y argumentos
+   validados (nunca interpolación de shell).
+7. El estado y los logs se consultan con `docker compose ps/logs/stats`.
+
+### Estructura del proyecto
+
+```
+app/                 Rutas [locale] y API routes
+actions/             Server Actions (compose, docker, auth, HA, backup…)
+components/          UI: playground, editor, display, ui
+lib/                 Docker, Mongo, auth, validación, metadata, sesión
+store/               Zustand (compose, execution, metadata, HA…)
+data/library/        142 plantillas JSON de servicios y stacks
+messages/            Catálogos en.json / es.json
+tests/               Vitest (unitarios e integración)
+scripts/             sync-icons, sanitize-library, secretos, smoke, licencias
+docs/SDD.md          Auditoría, modelo de amenazas y backlog
 ```
 
 ---
 
-## 🔄 Comparativa
+## 📦 Biblioteca de servicios
 
-| Feature | Docker Compose manual | Expanse |
-|---------|-----------------------|---------|
-| **Curva de aprendizaje** | Alta (YAML, networking, volumes) | Baja (visual drag & drop) |
-| **Tiempo de prototipado** | 30–60 min por stack | 5 min por stack |
-| **Errores de sintaxis** | Frecuentes (YAML es frágil) | Cero (generación automática) |
-| **Setup HA** | Manual (HAProxy, réplicas) | 1 clic |
-| **Monitoreo** | CLI `docker ps`, `logs` | Dashboard visual + terminal |
-| **Sharing** | Archivos `.yml` por email | Links compartibles |
-| **Validación de puertos** | Manual | Automática con reasignación |
+Cada plantilla vive en `data/library/<slug>.json` y sigue `TemplateService`
+(`types/library.ts`):
 
----
+```json
+{
+  "name": "MySQL",
+  "image": "mysql:8.0",
+  "category": "Database",
+  "logo": "mysql",
+  "description": "Relational database…",
+  "default_ports": ["3306:3306"],
+  "env_vars": { "MYSQL_ROOT_PASSWORD": "password" },
+  "volumes": ["mysql_data:/var/lib/mysql"]
+}
+```
 
-## 🌐 Internacionalización
-
-- **English (en)** — predeterminado
-- **Español (es)** — completo
-
-Los textos viven en `messages/en.json` y `messages/es.json` y se usan con `next-intl`.
-
----
-
-## 🧑‍💻 Desarrollo local
+Los stacks añaden `isStack: true` y `related_services`. Tras añadir o editar una plantilla:
 
 ```bash
-pnpm install          # instala dependencias
-pnpm sync-icons       # sincroniza iconos de la biblioteca (necesario antes de build)
-pnpm dev              # servidor de desarrollo en http://localhost:3000
-pnpm test             # tests unitarios (Vitest)
-pnpm test:docker      # valida todas las plantillas con `docker compose config`
-pnpm lint             # ESLint 9
-pnpm audit            # auditoría de dependencias (falla con avisos altos/críticos)
-pnpm license:check    # verifica que todos los archivos tengan el aviso de autoría
+pnpm sanitize-library   # normaliza el campo logo
+pnpm sync-icons         # descarga/sincroniza iconos en public/logos/library
+pnpm test:docker        # valida todas las plantillas con `docker compose config`
 ```
 
-Variables de entorno relevantes: `SECRET_KEY`, `MONGODB_URI`, `URL`, `CORE_ONLY`,
-`DISABLE_TELEMETRY`. Consulta `.env.example` y `docs/SDD.md`.
+Los nombres con espacios o paréntesis se sanean con `sanitizeDockerName()` antes de
+generar el YAML.
+
+> **Montajes privilegiados:** las plantillas que necesitan rutas del host (p. ej. WireGuard)
+> requieren `ALLOW_COMPOSE_HOST_ACCESS=true`. El socket de Docker solo se permite a un
+> **admin** y con ese mismo flag; para el resto de cuentas se rechaza siempre.
+
+---
+
+## 🧑‍💻 Desarrollo
+
+```bash
+pnpm install            # dependencias
+pnpm generate-secrets   # crea .env con SECRET_KEY/DB_USER/DB_PASS
+pnpm dev                # http://localhost:3000 (Turbopack)
+pnpm typecheck          # tsc --noEmit
+pnpm lint               # ESLint 9 (flat config)
+pnpm test               # Vitest
+pnpm test:docker        # plantillas contra `docker compose config`
+pnpm sync-icons         # necesario antes de build
+pnpm build              # build de producción (standalone)
+pnpm smoke              # smoke test contra una instancia en marcha
+pnpm license:check      # verifica avisos de autoría
+pnpm audit              # falla con avisos altos/críticos
+```
+
+Notas:
+
+- MongoDB en `MONGODB_URI` (por defecto `mongodb://localhost:27017`) y socket de Docker
+  en `/var/run/docker.sock`.
+- El proyecto usa **pnpm 12**; la configuración (`overrides`, `patchedDependencies`,
+  `allowBuilds`) está en `pnpm-workspace.yaml`.
+- `next.config.mjs` ignora errores de tipos/ESLint durante el build, pero CI ejecuta
+  `typecheck` y `lint` por separado.
+
+---
+
+## ✅ Calidad y tests
+
+- **Vitest** con jsdom: 18 archivos y 112 casos (110 activos) que cubren validación,
+  sesión, rate limit, ejecución Docker, generación de Compose/HA, plantillas, stores,
+  política de Compose, autorización de proyectos e imágenes.
+- Tests de integración que renderizan cada plantilla y la validan con la CLI real de
+  Compose (se omiten si Docker no está disponible).
+- CI en GitHub Actions: `lint`, `typecheck`, cabeceras de licencia, tests y `pnpm audit`.
+
+```bash
+pnpm test
+pnpm test:docker:all   # fuerza la validación de todas las plantillas
+```
 
 ---
 
 ## 🛡️ Seguridad
 
-Expanse monta el socket de Docker, por lo que **cualquier cuenta autenticada debe
-considerarse con privilegios de administrador del host**. Antes de exponer la instancia a
-Internet:
+Expanse ejecuta Docker desde la aplicación, por lo que el modelo de amenazas asume que
+una cuenta comprometida equivale a acceso al host. Antes de exponerlo a Internet:
 
-- Usa HTTPS y una `SECRET_KEY` robusta
-- Restringe el registro (`DISABLE_SIGNUP=true`) o el acceso a la red
-- Revisa el modelo de amenazas y el informe de auditoría en [`docs/SDD.md`](docs/SDD.md)
+- Usa HTTPS y una `SECRET_KEY` robusta (`pnpm generate-secrets`).
+- Restringe el registro (`DISABLE_SIGNUP=true`) o el acceso por red/VPN.
+- No publiques el puerto de MongoDB.
+- Revisa el modelo de amenazas completo en [`docs/SDD.md`](docs/SDD.md).
 
-Si encuentras una vulnerabilidad, escríbenos a
-[dinamicas.electronicas@gmail.com](mailto:dinamicas.electronicas@gmail.com) antes de abrir un
-issue público.
+Medidas implementadas:
+
+- **RBAC:** el primer usuario es `admin`; las operaciones de host exigen ese rol y los
+  recursos no gestionados requieren `ALLOW_HOST_PROJECT_OPS=true`.
+- **Propiedad por proyecto:** todas las acciones Docker cargan el Compose filtrando por
+  `userId`; el `_id` de un proyecto no es una capability.
+- **Política de Compose:** se rechazan `privileged`, `cap_add`, `devices`, `pid/ipc/uts`,
+  `network_mode: host`, montajes de rutas sensibles y el socket de Docker. Los montajes de
+  host y `build:` requieren un opt-in explícito del operador.
+- Toda Server Action llama a `ensureAuth()` y filtra consultas por `userId`.
+- Sesiones JWT con `sessionVersion`: cambiar la contraseña invalida las sesiones previas.
+- Validación de entrada con Zod en el límite del servidor.
+- Rate limiting en login, registro, reset, token de API y CLI.
+- Cookies `HttpOnly`, `SameSite=Lax` y `Secure` cuando `URL` es HTTPS.
+- Ejecución de Docker con `execFile`, validación de IDs y etiquetas
+  `com.expanse.owner`/`com.expanse.compose`.
+- Cabeceras de seguridad (CSP, nosniff, frame options, referrer policy, COOP, HSTS).
+- Índices únicos y TTL para sesiones, resets y CSRF.
+
+Si encuentras una vulnerabilidad, escribe a
+[dinamicas.electronicas@gmail.com](mailto:dinamicas.electronicas@gmail.com) antes de abrir
+un issue público.
+
+---
+
+## 🔁 CI/CD y publicación
+
+| Workflow | Cuándo | Qué hace |
+|----------|--------|----------|
+| `ci.yml` | Push/PR a `main` | Lint, typecheck, licencias, tests y auditoría |
+| `docker-image.yml` | Push/PR a `main` | Build de la imagen (y push a Docker Hub en `main`) |
+| `test-build.yml` | Otras ramas | Build de prueba sin publicar |
+| `release.yml` | Tags `v*` | Imagen multi-arquitectura + GitHub Release |
+
+La imagen se publica para `linux/amd64` y `linux/arm64` usando los secretos
+`DOCKER_USERNAME` y `DOCKER_PASSWORD`.
 
 ---
 
 ## 🤝 Contribuir
 
-Las contribuciones son bienvenidas. Lee [CONTRIBUTING.md](CONTRIBUTING.md) para conocer los
-estándares de código, el flujo de pull requests y la convención de avisos de autoría.
+Lee [CONTRIBUTING.md](CONTRIBUTING.md) para el flujo de pull requests, los estándares de
+código y la convención de cabeceras de autoría. Antes de enviar cambios:
+
+```bash
+pnpm typecheck && pnpm lint && pnpm test
+```
 
 ---
 
@@ -379,7 +545,7 @@ estándares de código, el flujo de pull requests y la convención de avisos de 
 | **GitHub** | [@Dinamicas-Electronicas](https://github.com/Dinamicas-Electronicas) |
 | **Licencia** | MIT © 2026 Dinámicas Electrónicas |
 
-Todos los archivos fuente incluyen el aviso de autoría correspondiente:
+Todos los archivos fuente incluyen el aviso de autoría:
 
 ```text
 Expanse — IDE visual de Docker Compose
@@ -394,16 +560,19 @@ redistribuirlo conservando el aviso de copyright.
 
 ## 🔮 Roadmap
 
-- [ ] **v2.0**: Multi-cluster management (Kubernetes)
-- [ ] **v2.1**: Templates marketplace con ratings
-- [ ] **v2.2**: GitOps integration (GitHub Actions)
-- [ ] **v2.3**: Team workspaces con RBAC
-- [ ] **v2.4**: Cloud deployment target (AWS, GCP, Azure)
+El plan de producto detallado (workspaces de equipo, Docker remoto, marketplace,
+GitOps y Kubernetes) está en [`PRODUCT_ROADMAP.md`](PRODUCT_ROADMAP.md). Próximos hitos:
+
+- [ ] **v2.0** — Gestión multi-cluster (Kubernetes)
+- [ ] **v2.1** — Marketplace de plantillas con valoraciones
+- [ ] **v2.2** — Integración GitOps (GitHub Actions)
+- [ ] **v2.3** — Workspaces de equipo con RBAC
+- [ ] **v2.4** — Despliegue en nubes públicas (AWS, GCP, Azure)
 
 ---
 
 <div align="center">
-  <sub>Hecho con ❤️ por <strong>Dinámicas Electrónicas</strong> para hacer Docker Compose accesible para todos.</sub>
+  <sub>Hecho con ❤️ por <strong>Dinámicas Electrónicas</strong> para hacer Docker Compose accesible a todos.</sub>
   <br/>
-  <sub>⭐ Si te gusta Expanse, danos una estrella en el repo.</sub>
+  <sub>⭐ Si te gusta Expanse, danos una estrella en el repositorio.</sub>
 </div>

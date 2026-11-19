@@ -1,554 +1,669 @@
-# SDD — Usabilidad, Estabilidad y Seguridad
+# SDD — Revisión integral, corrección y mejora
 
 | Campo | Valor |
 |---|---|
-| Proyecto | Expanse (IDE visual para Docker Compose) |
-| Versión analizada | `1.1.5` + cambios sin publicar (`next 15.5.29`, `pnpm 12.3.4`) |
+| Proyecto | Expanse — IDE visual para Docker Compose |
+| Versión | `1.1.5` · commit `f5a0bfd` (+ limpieza de código sin publicar) |
 | Fecha | 19 de noviembre de 2026 |
-| Alcance | Aplicación completa: UI de playground/dashboard, Server Actions, API routes, middleware, despliegue Docker y persistencia MongoDB |
-| Método | Revisión estática + ejecución real (contenedor `expanse:local`, MongoDB, Docker Engine 29) + pruebas dinámicas de Server Actions y APIs |
+| Alcance | UI (dashboard, playground, settings), Server Actions, API routes, middleware, generación de Compose/HA, persistencia MongoDB, Docker, i18n y build |
+| Método | Revisión estática línea a línea de `app/`, `actions/`, `components/`, `lib/` y `store/` + `typecheck`, `lint`, `test` y `pnpm audit` |
+| Sustituye | Al SDD del ciclo 1 (auditoría inicial). Los hallazgos ya cerrados se resumen en §2.3 |
 
 ---
 
 ## 1. Resumen ejecutivo
 
-La aplicación funciona en el camino feliz (arranque, login, listado, despliegue de stacks), pero la auditoría encontró **dos vulnerabilidades críticas explotables sin autenticación** y **un fallo de usabilidad que rompía el flujo principal de guardado**. Las tres están corregidas en este cambio y cubiertas con pruebas.
+El código compila, pasa 84 tests y no tiene vulnerabilidades conocidas en dependencias, pero
+la revisión encontró **57 defectos**: 2 críticos, 13 altos, 24 medios y 18 bajos. La mayoría
+no son errores de sintaxis, sino **de modelo de autorización, de confianza en datos del
+cliente y de flujos de producto a medio conectar**.
 
-| Área | Estado inicial | Estado tras este cambio |
+Los cinco riesgos que deben resolverse antes de exponer una instancia a Internet:
+
+1. **Cualquier visitante puede registrarse aunque el registro esté cerrado** llamando
+   directamente a `createOrLoginUser` (Server Action pública que no comprueba
+   `DISABLE_SIGNUP`, ni términos, ni rate limit).
+2. **El YAML se acepta sin política de seguridad**: un usuario autenticado puede montar
+   `/`, `/etc` o `/var/run/docker.sock`, usar `privileged`, `network_mode: host` o `build:`
+   y escapar del contenedor.
+3. **Las acciones Docker de proyecto no comprueban propiedad**: `stopCompose`, `restartCompose`,
+   `getComposeStatus` y `getComposeLogs` operan sobre cualquier `composeId` conocido.
+4. **La consola de host no tiene RBAC**: `removeProjectByName`, `removeVolume` y
+   `execDockerCommand` actúan sobre cualquier recurso del host solo con estar autenticado.
+5. **Todo el subsistema HA está desconectado**: la configuración elegida en el diálogo no se
+   persiste, y el generador produce un stack que no arranca en Docker Compose no-swarm
+   (red `overlay`, puerto 5432 duplicado, imagen `postgres` sin Patroni).
+
+Además hay fallos funcionales visibles: **la página de inicio nunca se muestra** (comprueba
+una cookie `HttpOnly` con `document.cookie`), **el logout de la portada no cierra sesión**,
+**borrar un proyecto no pide confirmación** y **"Cancelar" al crear un proyecto descarta los
+cambios**.
+
+### Estado por área
+
+| Área | Crítico | Alto | Medio | Bajo |
+|---|---:|---:|---:|---:|
+| Seguridad | 2 | 6 | 6 | 2 |
+| Funcionalidad / datos | — | 4 | 6 | 4 |
+| Estabilidad / rendimiento | — | 1 | 6 | 5 |
+| UX / accesibilidad / i18n | — | 1 | 4 | 4 |
+| Arquitectura / mantenimiento | — | 1 | 2 | 3 |
+| **Total** | **2** | **13** | **24** | **18** |
+
+### 1.1 Implementado en el ciclo 3 (bloque P0)
+
+El 19 de noviembre de 2026 se aplicó el bloque P0 completo. Los hallazgos siguen en el
+registro como línea base de auditoría; los siguientes quedan **cerrados**:
+
+| Tarea P0 | Hallazgos | Implementación |
 |---|---|---|
-| Seguridad | 2 críticas, 6 altas, 6 medias | Críticas cerradas; quedan riesgos **de arquitectura** (socket Docker, telemetría externa) documentados con plan |
-| Estabilidad | Crash del dashboard con proyectos, carrera de guardado, límite de 1 MB | Corregidos; quedan mejoras de concurrencia/observabilidad planificadas |
-| Usabilidad | Guardar mostraba un registro a usuarios ya logueados; sin estados de error globales | Corregido el flujo de guardado; añadidos `error.tsx`/`not-found.tsx`; quedan i18n y accesibilidad |
+| Autorización y RBAC | SEC-23, SEC-24, SEC-25, ARC-02 | `lib/authorization.ts` (`requireUser`, `requireAdmin`, `requireCompose`), etiquetas `com.expanse.owner/compose`, ownership en todas las acciones Docker, roles en MongoDB y bootstrap del primer admin. |
+| Política de Compose | SEC-22 | `lib/composePolicy.ts` + `docker compose config --quiet` antes de `up`. Montajes sensibles, `privileged`, `cap_add`, `devices`, `network_mode: host` y `build:` se rechazan por defecto. |
+| Registro y auth | SEC-21, SEC-26, SEC-27, SEC-28, SEC-33 | `createOrLoginUser` es solo login; `registerUser`/OAuth respetan `DISABLE_SIGNUP`; primer admin atómico (`lib/users.ts`); códigos de reset con CSPRNG; `sessionVersion` invalida sesiones al resetear; `/api/auth/jwt` con rate limit y parseo correcto. |
+| Portada y logout | FUNC-09 | La portada deja de leer `document.cookie`; el logout llama a la Server Action. |
+| HA | FUNC-01, FUNC-02, FUNC-03 | `haConfig`/`haEnabled` persistidos; generador reescrito (bridge, Bitnami Postgres, réplicas `db-replica-N`, HAProxy TCP, PgBouncer, backup); estado por `Service`; restauración con credenciales reales. |
+| Confirmaciones | UX-13, FUNC-06, FUNC-07 | Confirmación antes de borrar/quitar despliegue; «Cancelar» ya no descarta; borrado de cuenta con contraseña en servidor. |
+| Telemetría, versión y CSP | SEC-32, SEC-36 | Script externo solo con `ENABLE_EXTERNAL_TELEMETRY=true`; versión consultada en `Dinamicas-Electronicas/expanse`; CSP añadida. |
 
-**Riesgo residual más importante:** el contenedor corre como `root` con `/var/run/docker.sock` montado y el registro público está habilitado por defecto. Cualquier persona que cree una cuenta obtiene, por diseño, control equivalente a root sobre el host. Se detalla en SEC-13 y requiere una decisión de producto (SEC-13 es P0 para instancias expuestas a Internet).
+> **Alcance HA:** el generador crea una topología desplegable y validada con Compose, pero
+> **no reconecta automáticamente** los servicios existentes del stack al nuevo proxy ni
+> migra los datos del servicio Postgres original. Esa integración (y el failover real)
+> queda en P1.
 
----
+**Verificación del ciclo 3**
 
-## 2. Alcance y método de verificación
-
-### 2.1 Pruebas ejecutadas
-
-```bash
-pnpm typecheck          # OK
-pnpm lint               # 0 errores (6 warnings de fast-refresh)
-pnpm test               # 86 tests: 84 OK, 2 smoke opt-in
-pnpm audit --audit-level=low   # 0 advisories
-docker compose build app       # OK
-docker compose up -d           # db healthy + app healthy
-curl /api/ping                 # 200
+```text
+pnpm typecheck   ✅
+pnpm lint        ✅ 0 errores (3 warnings preexistentes)
+pnpm test        ✅ 18 archivos, 110 tests OK, 2 skipped
+pnpm build       ✅ standalone
+HA + docker compose config --quiet  ✅ (test de integración)
+pnpm audit       ✅ 0 advisories
 ```
 
-Se ejecutaron además pruebas **dinámicas contra el contenedor real**:
+Nuevos módulos: `lib/authorization.ts`, `lib/composePolicy.ts`, `lib/users.ts`,
+`lib/composeStore.ts`, `lib/github.ts`, `lib/imageRef.ts`.
+Nuevos tests: `tests/lib/composePolicy.test.ts`, ampliación de `tests/actions/auth.test.ts`
+y validación real del Compose HA con la CLI.
 
-- invocación de Server Actions con y sin sesión (cabecera `Next-Action`);
-- APIs con IDs malformados, shares huérfanos y shares válidos;
-- cabeceras `Set-Cookie` reales de login;
-- recorrido de rutas con locales no soportados;
-- validación del YAML generado con `docker compose config` y `docker compose up -d`.
-
-### 2.2 Evidencias (resumen)
-
-| Prueba | Resultado observado |
-|---|---|
-| POST Server Action `getComposeByIdPublic` sin cookie | Devolvió datos del proyecto **incluyendo variables de entorno con contraseñas** |
-| POST `createOrLoginUser(email víctima, {external:"github", password:"incorrecta"})` | `200` + `Set-Cookie: token=…` (sesión válida) |
-| POST `registerUser` con password `"123"` y email inválido | Usuario creado + cookie de sesión |
-| `Set-Cookie` del login | `token=…; Path=/; HttpOnly` — **sin `SameSite` ni `Secure`** |
-| `GET /api/export/png?shareId=<share válido>` | `404 {"error":"Share not found"}` (consultaba la BD `compose_craft`) |
-| `GET /api/export/png?shareId=nope` | `500` + mensaje interno de BSON |
-| `GET /api/compose?id=nope` | `500` |
-| `GET /fr/dashboard` y `/fr/deploy/settings` sin sesión | `200` (bypass del middleware) |
-| `GET /api/logos/library/..%2Ftimescaledb` | `404` (traversal no explotable, pero sin allowlist) |
-| Índices MongoDB | Solo `_id_` en `users`, `composes`, `shares` |
-
-> Las pruebas se hicieron contra una instancia local del propio operador. No se modificó ni eliminó ningún dato suyo; los usuarios/shares de prueba se borraron al terminar.
+Quedan abiertos los bloques **P1** (concurrencia de guardado, timeouts Mongo, polling,
+i18n/accesibilidad, stubs, layout raíz) y **P2** (MFA, shares firmados, audit log, límites,
+socket proxy).
 
 ---
 
-## 3. Arquitectura actual (contexto)
+## 2. Alcance, método y estado
+
+### 2.1 Comprobaciones automáticas ejecutadas
+
+```bash
+pnpm typecheck          # OK (0 errores)
+pnpm lint               # OK (0 errores, 3 warnings de react-refresh)
+pnpm test               # 18 archivos, 110 tests OK, 2 skipped
+pnpm audit --audit-level=high  # 0 advisories
+```
+
+Estas comprobaciones no detectan ninguno de los hallazgos de este documento: son defectos de
+lógica, autorización o diseño, no de tipos.
+
+### 2.2 Límites de esta revisión
+
+- **No se repitió la prueba dinámica contra un contenedor en este ciclo.** Los hallazgos son
+  estáticos y citan `archivo:línea`; los que dependen de comportamiento (p. ej. nombres de
+  contenedores de `docker compose ps`) se marcan como «verificar en integración».
+- No se ha modificado ningún dato del operador.
+- Los IDs `SEC-21+`, `FUNC-*`, `STB-13+`, `UX-13+` y `ARC-*` continúan la numeración del
+  ciclo 1 para no reutilizar identificadores ya cerrados.
+
+### 2.3 Ciclo 1 — ya corregido (no reabrir)
+
+| Área | Cambios vigentes |
+|---|---|
+| Auth | Account takeover de `createOrLoginUser`, IDOR de `getComposeByIdPublic`, validación de registro, cookie `HttpOnly/SameSite/Secure`, rate limit básico |
+| Autorización | Ownership en shares y acciones HA; `ensureAuth()` en sistema y nodos |
+| APIs | `/api/export/png` con BD correcta y solo shares públicos; `/api/compose` con 400; allowlist de logos |
+| Middleware | Locales validados, `/deploy` protegido, sin bucle si falta `SECRET_KEY` |
+| Estabilidad | Crash del dashboard corregido, carrera de autoguardado entre proyectos, body limit 4 MB, índices/TTL |
+| Limpieza | Documentación obsoleta, código muerto y assets duplicados eliminados; README reescrito |
+
+---
+
+## 3. Arquitectura y límites de confianza
 
 ```
 ┌──────────────────────────── Navegador ────────────────────────────┐
-│  Next.js App Router (client components)                           │
-│  Zustand (compose, HA, execution)  ·  React Flow  ·  Monaco/xterm │
+│ Next.js App Router (client components)                            │
+│ Zustand (compose, execution, metadata) · React Flow · Monaco      │
 └───────────────▲───────────────────────────────┬───────────────────┘
                 │ RSC / Server Actions          │ fetch APIs
 ┌───────────────┴───────────────────────────────▼───────────────────┐
-│  Next.js standalone (Node 24, contenedor root)                    │
-│  middleware.ts  → next-intl + verificación JWT                    │
-│  actions/*      → Server Actions (ensureAuth)                     │
-│  app/api/*      → API routes (JWT propio o público por diseño)    │
-│  lib/dockerExec → execFile(docker …)  (sin shell)                 │
+│ Next.js standalone (Node 24, contenedor root)                    │
+│ middleware.ts → next-intl + JWT                                  │
+│ actions/*      → Server Actions (ensureAuth, sin ownership en    │
+│                  varias acciones de Docker)                       │
+│ app/api/*      → APIs públicas (share) o con JWT (CLI)           │
+│ lib/dockerExec → execFile(docker …)  (sin shell)                 │
+│ lib/metadata   → generador Compose/HA                            │
 └───────────────▲───────────────────────────────┬───────────────────┘
-                │ MongoDB (db: expanse)          │ /var/run/docker.sock
+                │ MongoDB (expanse)              │ /var/run/docker.sock
 ┌───────────────┴───────────────┐   ┌────────────▼───────────────────┐
 │ users · composes · shares     │   │ Docker Engine del host         │
-│ reset_code · csrf_token       │   │ contenedores de todos los users│
+│ reset_code · csrf_token       │   │ contenedores de todos los users │
 └───────────────────────────────┘   └────────────────────────────────┘
 ```
 
 **Límites de confianza**
 
-1. Navegador → servidor: no confiable. Toda acción debe autenticar y autorizar.
-2. Servidor → Docker: **privilegiado** (root + socket). Cualquier función que acepte nombres/IDs de Docker es una operación de administrador.
-3. Servidor → MongoDB: confiable; el aislamiento entre usuarios depende de filtros en cada consulta.
-4. Servidor → Internet: telemetría de terceros (`opentech-ux.org`) y GitHub/Brevo.
+1. **Cliente → servidor: no confiable.** El cliente puede enviar cualquier `yamlContent`,
+   `composeId`, `projectName`, `containerId`, `imageBase64` o `userId`.
+2. **Servidor → Docker: privilegiado.** Montar el socket convierte la app en una consola de
+   administración; autenticarse equivale, por diseño, a root sobre el host.
+3. **Servidor → MongoDB: confiable para integridad, no para autorización.** Cada consulta
+   debe filtrar por `userId`; el `_id` nunca es una capability.
+4. **Servidor → Internet:** GitHub, Brevo, Docker Hub, CDN de iconos y un script de
+   telemetría de terceros.
+
+> **Premisa de producto:** Expanse no es multi-tenant seguro. Si se mantiene el registro
+> abierto, cualquier cuenta nueva obtiene control del host. El plan P0 lo asume y propone
+> RBAC + política de Compose + registro cerrado por defecto.
 
 ---
 
-## 4. Hallazgos y estado
+## 4. Registro de hallazgos
 
-Escala: **Crítica** (compromiso total / pérdida de datos), **Alta** (acceso cruzado, bypass de auth, feature rota), **Media** (impacto limitado o requiere condiciones), **Baja** (endurecimiento).
+Escala: **Crítica** (compromiso del host o bypass total de auth), **Alta** (acceso cruzado,
+feature principal rota o pérdida de datos), **Media** (impacto limitado o requiere condiciones),
+**Baja** (endurecimiento, mantenimiento o deuda técnica).
 
 ### 4.1 Seguridad
 
-| ID | Sev. | Hallazgo | Evidencia | Estado |
+| ID | Sev. | Hallazgo | Evidencia | Impacto |
 |---|---|---|---|---|
-| SEC-01 | Crítica | **Account takeover** en la Server Action `createOrLoginUser`: si el payload incluía `external`, se omitía la verificación de contraseña. | Sesión emitida con contraseña incorrecta | **Corregido.** `createOrLoginUser` solo acepta contraseña; OAuth usa `lib/oauth.ts` (no es Server Action). Test: `tests/actions/auth.test.ts` |
-| SEC-02 | Crítica | **Lectura no autenticada de cualquier compose** vía `getComposeByIdPublic` (Server Action). Exponía servicios, variables de entorno y credenciales. | Payload con `MYSQL_ROOT_PASSWORD` y `MYSQL_PASSWORD` | **Corregido.** `ensureAuth()` + filtro `userId`; el id del proyecto ya no es una capability |
-| SEC-03 | Alta | **Registro sin validación server-side**: email inválido, contraseña `"123"`, términos sin aceptar; sin límite de intentos. | Usuario creado con `role=user` | **Corregido.** `lib/validation.ts` + límite 5/h por IP. Política nueva: 8–100 caracteres |
-| SEC-04 | Alta | **Sin rate limiting** en login, `/api/auth/jwt` (Basic Auth), reseteo y token CLI. Permite fuerza bruta y abuso de correo. | Revisión de código | **Mitigado.** `lib/rateLimit.ts` (ventana fija en memoria). Pendiente: almacén compartido (Redis) para multi-réplica |
-| SEC-05 | Alta | **Cookie de sesión sin `SameSite` ni `Secure`** ni expiración alineada explícita. | `Set-Cookie` real | **Corregido.** `lib/session.ts`: `HttpOnly`, `SameSite=Lax`, `Secure` automático si `URL` es HTTPS |
-| SEC-06 | Alta | **IDOR al compartir**: `shareCompose` creaba un enlace público para cualquier `composeId` sin comprobar propiedad. | Revisión de código | **Corregido.** Verificación de propiedad antes de insertar el share |
-| SEC-07 | Alta | **IDOR en operaciones HA**: `getHAStatus`, `simulateFailover`, `triggerBackup`, `listBackups`, `restoreBackup`, `getPoolMetrics`, `updatePoolConfig` buscaban el compose solo por `_id`. | Revisión de código | **Corregido.** Todas las consultas/actualizaciones filtran por `userId` |
-| SEC-08 | Media | **Server Actions sin autenticación**: `getLocalSystemInfo` (revelaba IPs internas) y `saveRemoteNodeConfig` (credenciales de nodos remotos). | `200` con IP interna sin sesión | **Corregido.** `ensureAuth()` en ambas |
-| SEC-09 | Alta | **Secretos en logs**: `console.log(ghToken)` (token OAuth de GitHub), URL de reseteo con código en claro y código en consola del navegador. | Revisión de código | **Corregido.** Logs eliminados/redactados. **Rotar el token de GitHub si los logs se conservaron** |
-| SEC-10 | Alta | **Bypass de middleware por locale no soportado**: `/fr/dashboard` y `/fr/deploy/settings` evitaban el matcher y se servían sin sesión. | `200` sin sesión | **Corregido.** Validación de locale + matcher recomendado por next-intl |
-| SEC-11 | Media | `/deploy/settings` no estaba en las rutas protegidas por middleware (solo acciones protegidas). | `200` sin sesión | **Corregido.** Añadido prefijo `/deploy` |
-| SEC-12 | Media | **Sin cabeceras de seguridad** (CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, HSTS condicional). | `curl -I` sin cabeceras | **Corregido parcialmente.** `next.config.mjs`; CSP pendiente (requiere nonces) |
-| SEC-13 | Alta\* | **Socket Docker + contenedor root + registro público**: toda cuenta autenticada puede parar/borrar contenedores y volúmenes de cualquier proyecto y ejecutar comandos arbitrarios (`execDockerCommand`). Además permite montajes de rutas del host (`/`, `/etc`, socket) en stacks desplegados. | Revisión de código y diseño | **Abierto (decisión de producto).** Plan en §7.5 |
-| SEC-14 | Alta | **Script de terceros** `opentech-ux.org` cargado con `beforeInteractive` sin SRI cuando `DISABLE_TELEMETRY` no está definido. | `components`/layout | **Abierto.** Recomendado: eliminar o hacer opt-in + SRI |
-| SEC-15 | Media | **Sesiones no revocables**: JWT de 30 días, sin lista de revocación; cambiar la contraseña no invalida sesiones; sin MFA. | Revisión de código | **Abierto.** Plan §7.4 |
-| SEC-16 | Media | **Token CLI en query string** (`http://localhost:5555?token=…`): queda en historial, logs y cualquier proceso local que escuche el puerto. | Revisión de código | **Abierto.** Recomendado: POST con cuerpo + callback con nonce |
-| SEC-17 | Alta | **`/api/export/png` consultaba la base `compose_craft`** en vez de `expanse` (la feature nunca funcionó), devolvía `500` con detalle interno para IDs inválidos y no verificaba `access`. | `404 Share not found` con share válido; `500` con `BSONError` | **Corregido.** `getDb()`, validación de ObjectId, solo shares públicos, errores genéricos |
-| SEC-18 | Baja | `/api/compose` devolvía `500` con ID inválido. | `500` | **Corregido.** `400` + validación |
-| SEC-19 | Baja | `/api/logos/library/[name]` sin allowlist de nombre. El traversal no fue explotable, pero no había defensa en profundidad. | Pruebas con `%2F` | **Corregido.** Regex `^[a-z0-9][a-z0-9-]{0,62}$` + comprobación de contención |
-| SEC-20 | Media | **Sin índices**: `users.email` no era único (cuentas duplicadas en concurrencia), `reset_code`/`csrf_token` crecían sin TTL y las consultas por usuario escaneaban la colección. | `getIndexes()` = solo `_id_` | **Corregido.** `lib/dbIndexes.ts` (bootstrap idempotente con TTL) |
+| **SEC-21** | Crítica | `createOrLoginUser` es una Server Action pública que **crea usuarios sin comprobar `DISABLE_SIGNUP`**, sin términos, sin `company` y sin rate limit. OAuth (`loginOrRegisterOAuthUser`) tampoco respeta `DISABLE_SIGNUP`. | `actions/userActions.ts:33-82`, `lib/oauth.ts:25-48` | Bypass del cierre de registro; creación masiva de cuentas; cuentas sin consentimiento |
+| **SEC-22** | Crítica | El YAML del cliente se ejecuta **sin política de seguridad**. No se rechazan `privileged`, `cap_add`, `devices`, `pid/ipc: host`, `network_mode: host`, montajes de `/`, `/etc`, `/root`, `/var/run/docker.sock` ni `build:` con contexto arbitrario. | `actions/dockerActions.ts:37-190`; `lib/dockerCompose.ts:208-254` | Escape del contenedor → root en el host |
+| **SEC-23** | Alta | **IDOR en acciones Docker de proyecto.** `runCompose`, `stopCompose`, `restartCompose`, `getComposeStatus` y `getComposeLogs` solo llaman a `ensureAuth()`; no verifican que el compose pertenezca al usuario. | `actions/dockerActions.ts:42,51,193-212,215-226,288-341` | Parar/leer logs de stacks ajenos; fuga de secretos en logs |
+| **SEC-24** | Alta | **Operaciones de host sin RBAC.** `stopProjectByName`, `removeProjectByName` (borra volúmenes), `stopContainer`, `removeContainer`, `removeVolume` y `execDockerCommand` aceptan cualquier referencia del host. No se exige rol admin ni se limita el prefijo `expanse-project_`. | `actions/dockerActions.ts:553-655,775-791` | Destrucción de contenedores/volúmenes de otros proyectos del host; `sh -c` en cualquier contenedor |
+| **SEC-25** | Alta | `registerComposeWithoutMetadata(compose, userId)` se exporta desde un módulo `'use server'` y **acepta el `userId` como parámetro**. | `actions/userActions.ts:185-198` | Escritura de proyectos en la cuenta de otro usuario |
+| **SEC-26** | Alta | `getGithubAccesToken(code)` se exporta desde `actions/github.ts` (`'use server'`) y **devuelve el access token de GitHub** al invocador. | `actions/github.ts:18-34` | Endpoint público para canjear códigos OAuth con el `client_secret` de la app |
+| **SEC-27** | Alta | `/api/auth/jwt` (Basic Auth) **no tiene rate limiting**, normaliza mal el email, `bcrypt.compare` con `user.password` indefinido lanza 500 y `split(':')` rompe contraseñas con `:`. | `app/api/auth/jwt/route.ts:16-55` | Fuerza bruta de credenciales; CLI rota para contraseñas válidas con `:` |
+| **SEC-28** | Alta | Los **códigos de reseteo se generan con `Math.random`** (no CSPRNG) y, tras resetear, **no se invalidan las sesiones JWT** existentes. | `lib/utils.ts:50-58`; `actions/userActions.ts:453,505-508` | Predicción/adivinación del código; sesión robada sigue válida 30 días |
+| **SEC-29** | Media | El rate limit usa `x-forwarded-for` **sin proxy de confianza** y el `Map` de buckets **nunca se purga**. | `lib/rateLimit.ts:13,28-52` | Bypass por cabecera falsificada; crecimiento de memoria |
+| **SEC-30** | Media | Compartir publica **el Compose completo con variables de entorno y contraseñas**; el enlace es permanente, sin advertencia ni revocación desde el visor. `/api/compose?id=` devuelve el YAML íntegro. | `actions/composeActions.ts:50-61`; `app/api/compose/route.ts:17-46` | Cualquiera con el enlace obtiene credenciales de la base de datos |
+| **SEC-31** | Media | `deleteUser` **anonimiza** los composes (`userId: null`) en vez de borrarlos, **no elimina los shares públicos** y redirige a un formulario externo. No exige contraseña en servidor. | `actions/userActions.ts:369-394`; `components/display/settings.tsx:63-73` | Proyectos compartidos siguen públicos tras borrar la cuenta; borrado incompleto |
+| **SEC-32** | Media | Script de terceros `opentech-ux.org` cargado por defecto con `beforeInteractive`; la comprobación de versión consulta **`lordpietre/expanse`**, no este repositorio, en cada render (hasta 2 s). | `app/[locale]/layout.tsx:32-59`; `lib/utils.ts:66-105` | Telemetría no consentida; fuga de tráfico; banner de versión incorrecto; latencia |
+| **SEC-33** | Media | El primer usuario es admin por `countDocuments() === 0`; dos registros concurrentes pueden **ambos** ser admin. | `actions/userActions.ts:65-74`; `lib/oauth.ts:35-42` | Escalada de rol en instalaciones nuevas |
+| **SEC-34** | Baja | `deleteCompose` no valida el ObjectId, no borra los shares asociados y deja contenedores/volúmenes en ejecución. | `actions/userActions.ts:401-413` | Error 500 con IDs inválidos; shares huérfanos; recursos fantasma |
+| **SEC-35** | Baja | Los PNG se guardan en `public/exports` con nombre derivado del **checksum del contenido**, servidos estáticamente; dos usuarios con el mismo Compose comparten fichero. `exportPlaygroundAsPNGToFile` no comprueba propiedad. | `actions/userActions.ts:162-178`; `app/actions/exportActions.ts:118-168` | Colisión entre usuarios; exposición directa sin pasar por la API |
+| **SEC-36** | Media | No hay **CSP** y el build ignora errores de tipos/ESLint (`ignoreBuildErrors`, `ignoreDuringBuilds`). | `next.config.mjs:38-46` | Menor defensa contra XSS; errores que solo detecta CI |
 
-\* SEC-13 es Alta en una instalación mono-operador y **Crítica** si la instancia está expuesta con registro abierto.
+### 4.2 Funcionalidad y datos
 
-### 4.2 Usabilidad
+| ID | Sev. | Hallazgo | Evidencia | Impacto |
+|---|---|---|---|---|
+| **FUNC-01** | Alta | **La configuración HA nunca se persiste.** `haDeploymentDialog` pasa un objeto efímero a `runCompose`, pero nadie escribe `haConfig`/`haEnabled` en MongoDB. `restartCompose` no recibe HA y todas las acciones `getHAStatus`, `simulateFailover`, `triggerBackup`, `listBackups`, `restoreBackup` exigen `doc.haEnabled`, que siempre es falso. | `components/playground/playGroundContent.tsx:294-347`; `actions/dockerActions.ts:54-83,228-257`; `actions/databaseHA.ts:384-386,519-522,629-631` | Toda la UI HA es decorativa; el reinicio pierde el balanceador/pooling |
+| **FUNC-02** | Alta | **El Compose HA generado no arranca** en Compose normal: red `overlay` (requiere swarm), `5432:5432` publicado por `db-primary`, `db-replica` y `haproxy`, imagen `postgres:16-alpine` sin Patroni ni entrypoint, `depends_on: haproxy` aunque el LB esté desactivado, `deploy.placement` y `{{.Task.Slot}}` exclusivos de swarm. | `lib/metadata.ts:492-663` | «Deploy with HA» falla o queda degradado |
+| **FUNC-03** | Alta | `getHAStatus` busca contenedores por `Name` (`expanse-project_x-db-primary-1`) cuando debería usar `Service`; nunca encuentra el primario → estado `critical`. Métricas de pool devueltas a cero y `restoreBackup` usa usuario/BD hardcodeados (`postgres`/`expanse`). | `actions/databaseHA.ts:424-470,724-756,793-810` | Panel HA siempre en rojo; métricas y restauración falsas |
+| **FUNC-04** | Media | `validateComposePorts` solo entiende `"host:container"`: ignora `"IP:host:container"`, `/tcp|udp` y rangos. `getAvailablePort` no conoce los puertos ya reservados en el mismo YAML y puede devolver duplicados. `checkPort` escucha **dentro del contenedor**, no en el host, por lo que no detecta servicios nativos del host. | `actions/dockerActions.ts:514-551,725-773` | Colisiones que solo aparecen al desplegar; reintentos innecesarios |
+| **FUNC-05** | Media | `isExecuting` solo pasa a `true`; si todos los contenedores se paran o mueren, la UI sigue en modo «Stop» y sigue haciendo polling. No hay pausa con `document.hidden` ni backoff. | `components/playground/playGroundContent.tsx:239-284` | Estado mentiroso; llamadas Docker cada 3–8 s de forma indefinida |
+| **FUNC-06** | Media | «Delete File» y «Remove Deployment» **no piden confirmación** y no son coherentes: borrar fichero deja el stack corriendo; quitar el despliegue borra volúmenes por defecto. | `components/display/composeTable/composeRow.tsx:24-64` | Pérdida de datos con un clic |
+| **FUNC-07** | Media | En «New», el `confirm()` pregunta «¿guardar antes de crear?» pero **Cancelar también descarta** y no aborta la creación. | `components/playground/playGroundContent.tsx:133-142` | Pérdida de cambios silenciosa |
+| **FUNC-08** | Media | El parseo de imágenes usa `split(':')`: rompe `registry:5000/app`, `ghcr.io/org/app:tag` y digests `@sha256:`. | `store/compose.ts:251,405-407` | Servicios con imagen incorrecta o tag perdido |
+| **FUNC-09** | Alta | La portada comprueba la sesión leyendo `document.cookie`, pero el token es `HttpOnly`: **siempre redirige**. Además, el botón de logout de la portada borra una cookie inexistente en vez de llamar a `logout()`. | `app/[locale]/page.tsx:38-42,141-147` | La lista de proyectos de `/` nunca se ve; el logout no cierra sesión |
+| **FUNC-10** | Baja | `loginUser` y `askPasswordReset` no normalizan el email a minúsculas; el registro sí lo hace. | `actions/userActions.ts:229-249,431-446` | Login/reseteo falla con mayúsculas |
+| **FUNC-11** | Baja | `resetCompose` limpia el id **antes** de leerlo para parar el polling HA. | `store/compose.ts:195-205` | El polling/config HA del proyecto anterior no se limpia |
+| **FUNC-12** | Baja | `revalidatePath("/dashboard/shares")` apunta a una ruta inexistente (la real es `/dashboard/deploys`). Hay dos dashboards con lógica duplicada y divergente (logout incluido). | `actions/composeActions.ts:44,146`; `app/[locale]/page.tsx` vs `app/[locale]/dashboard/(dashboard)/page.tsx` | Listas desactualizadas; deriva de comportamiento |
+| **FUNC-13** | Baja | `/api/compose/machine` hace `Object.keys(body?.volumes)` sin fallback y `image.split(':')` sin comprobar el tipo; un Compose sin volúmenes/redes devuelve 403 engañoso. | `app/api/compose/machine/route.ts:40-67` | Importación CLI falla con archivos válidos |
+| **FUNC-14** | Media | Funciones **stub presentadas como reales**: guardar nodos remotos devuelve éxito sin guardar, Google Drive devuelve «coming soon», las métricas de pool son ceros y «Reapply limits» siempre muestra error. La ruta `export-render` está muerta y `actions/exportActions.ts` está duplicado. | `actions/systemActions.ts:58-65`; `actions/backupActions.ts:44-48`; `actions/databaseHA.ts:793-810`; `components/display/projectMonitor.tsx:70-72` | El usuario cree que ha configurado algo que no existe |
 
-| ID | Sev. | Hallazgo | Estado |
-|---|---|---|---|
-| UX-01 | Crítica | **El dashboard no listaba proyectos**: `console.log(..., data.length)` dentro del propio `map` de `data` lanzaba `ReferenceError` (TDZ); el `catch` redirigía a `/login`. Solo funcionaba con 0 proyectos. | **Corregido** (`app/[locale]/page.tsx`) |
-| UX-02 | Alta | **Guardar mostraba el formulario de registro a usuarios autenticados**: el store `disabled` empieza en `true` y nadie lo activaba tras un login normal. Autoguardado efectivamente desactivado. | **Corregido.** El playground consulta la sesión y habilita guardado/autoguardado |
-| UX-03 | Alta | **Riesgo de pérdida de datos**: el guardado en `beforeunload` es asíncrono y el navegador no garantiza su finalización; sin indicador de estado ni bloqueo de navegación. | **Parcial.** Autoguardado restaurado; pendiente `sendBeacon` + indicador |
-| UX-04 | Media | Compartir un proyecto inexistente/borrado mostraba un canvas vacío sin explicación. | **Corregido** (estado "Shared project not found") |
-| UX-05 | Media | Sin `error.tsx`/`not-found.tsx` globales y el boundary de share mostraba `error.message` (detalles internos). | **Corregido.** Páginas propias y mensajes genéricos con `digest` |
-| UX-06 | Media | Cadenas hardcodeadas en inglés dentro de una app bilingüe; `/fr` aceptaba un locale inexistente (contenido en inglés y `lang="fr"`). | **Parcial.** Locale validado; i18n pendiente |
-| UX-07 | Media | Accesibilidad: 0 `aria-label`, 3 `<img>` sin `alt`, botones solo-icono sin nombre accesible, sin foco visible homogéneo. | **Abierto** |
-| UX-08 | Media | Confirmaciones inconsistentes; la "puerta" de contraseña de operaciones destructivas es solo cliente (las acciones no la exigen). | **Abierto** |
-| UX-09 | Baja | Feedback de despliegue poco accionable (fase + toast); los puertos se reasignan automáticamente sin confirmación. | **Abierto** |
-| UX-10 | Baja | `login/cli` no explica el flujo ni el estado; token en URL. | **Abierto** |
-| UX-11 | Media | `saveRemoteNodeConfig` y `exportToGoogleDrive` son stubs que devuelven éxito/"coming soon" y aparentan funcionalidad. | **Abierto** |
-| UX-12 | Baja | El nombre de volumen se sanea en silencio; el usuario no ve el nombre final. | **Abierto** |
+### 4.3 Estabilidad y rendimiento
 
-### 4.3 Estabilidad
+| ID | Sev. | Hallazgo | Evidencia | Impacto |
+|---|---|---|---|---|
+| **STB-13** | Alta | Guardado **last-write-wins** sin versión; dos pestañas se sobrescriben. El guardado en `beforeunload` es un `fetch` asíncrono sin `keepalive`/`sendBeacon`, que el navegador puede cancelar. | `actions/userActions.ts:141-151`; `store/compose.ts:113-137` | Pérdida de trabajo |
+| **STB-14** | Media | `MongoClient` sin `serverSelectionTimeoutMS`, retry ni endpoint `/api/ready`; si Mongo cae, las peticiones esperan ~30 s y devuelven errores genéricos. | `lib/mongodb.ts:18-42`; `app/api/ping/route.ts` | Cuelgues y diagnóstico difícil |
+| **STB-15** | Media | Sin límites de CPU/memoria para app/db; `/tmp/expanse-*` y `public/exports` crecen sin retención. Cada autoguardado ejecuta `html-to-image` sobre todo el canvas. | `docker-compose.yml`; `store/compose.ts:49-67` | Agotamiento del host; UI congelada |
+| **STB-16** | Media | Sin bloqueo por proyecto: dos clics en Run lanzan dos `docker compose up` concurrentes; Run/Restart no se excluyen. | `components/playground/playGroundContent.tsx:294-470` | Estado inconsistente y errores de Compose |
+| **STB-17** | Media | Todas las operaciones Docker comparten `timeout: 30 min`; no hay cancelación ni timeout por tipo (ps/logs/stats deberían ser segundos). | `lib/dockerExec.ts:22` | Peticiones colgadas 30 min |
+| **STB-18** | Media | Polling sin backoff ni pausa en pestaña oculta; `ProjectMonitor` llama a `docker stats` cada 3 s mientras esté montado. | `components/display/projectMonitor.tsx:50-64` | Carga alta en el daemon |
+| **STB-19** | Baja | 25 `console.log` sin estructura; se devuelven `error.message` de Docker al cliente (rutas internas, nombres de contenedores). | `actions/dockerActions.ts` (varios) | Poca observabilidad; fuga de detalles |
+| **STB-20** | Media | El test de HA **valida el diseño roto** (afirma que la red es `overlay`) y no se prueba `docker compose config/up`; no hay tests de autorización ni E2E. | `tests/integration/haGeneration.integration.test.ts:76-92` | Falsa confianza |
+| **STB-21** | Baja | El healthcheck solo usa `/api/ping` (proceso vivo), no comprueba Mongo ni el socket Docker. | `docker-compose.yml` | Reinicios no detectan dependencias caídas |
+| **STB-22** | Baja | El índice único de `users.email` puede fallar silenciosamente con datos legacy duplicados; no hay migración de normalización. | `lib/dbIndexes.ts:29-44` | Duplicados y lookups inconsistentes |
+| **STB-23** | Baja | El intervalo de iconos no usa `unref()` y la detección de proceso principal usa la variable mal escrita `NEXT_MANUAL_SIGIG`. | `instrumentation.ts:18-34` | Tareas duplicadas; proceso retenido |
+| **STB-24** | Baja | El parseo de `docker system df -v` por líneas/espacios es frágil ante cambios de formato o nombres con espacios. | `actions/dockerActions.ts:407-441,690-717` | Tamaños de volumen incorrectos |
 
-| ID | Sev. | Hallazgo | Estado |
-|---|---|---|---|
-| STB-01 | Alta | **Carrera de autoguardado entre proyectos**: el debounce guardaba con el `id` actual, no con el del proyecto editado; cambiar de proyecto en <2 s podía sobrescribir otro proyecto. | **Corregido.** El `id` se captura al programar el guardado y se cancela al cambiar/resetear |
-| STB-02 | Alta | **Límite de 1 MB por Server Action**: el guardado adjunta un PNG en base64; diagramas grandes fallaban con un error genérico. | **Corregido.** `serverActions.bodySizeLimit = 4mb` |
-| STB-03 | Alta | `generateHAComposeAction` leía `doc.compose` (campo inexistente; los composes se guardan en `data`). | **Corregido** |
-| STB-04 | Media | Guardado **last-write-wins** sin control de versión: dos pestañas pueden sobrescribirse. | **Abierto.** Plan §6.3 |
-| STB-05 | Media | MongoDB sin `serverSelectionTimeoutMS`/retry: si la BD cae, las peticiones esperan ~30 s y devuelven errores genéricos. | **Abierto** |
-| STB-06 | Media | Sin índices ni TTL (duplicados de email, colecciones creciendo). | **Corregido** (`lib/dbIndexes.ts`) |
-| STB-07 | Media | Sin límites de recursos en `docker-compose.yml` (app/db) ni `mem_limit`; un stack grande puede agotar el host. | **Abierto** |
-| STB-08 | Media | `/tmp/expanse-*` y `public/exports` sin retención; los logs de docker se acumulan en `/tmp` del contenedor. | **Abierto** |
-| STB-09 | Baja | Múltiples pollers (3 s / 5 s / 10 s) sin backoff ni pausa en pestaña oculta. | **Abierto** |
-| STB-10 | Baja | El layout consulta la última versión en GitHub en cada arranque (con presupuesto de 2 s) y carga telemetría externa bloqueante. | **Abierto** |
-| STB-11 | Baja | Logs no estructurados: `console.log` de la salida de Docker, sin niveles ni redacción. | **Abierto** |
-| STB-12 | Baja | Sin pruebas E2E de UI (login→crear→guardar→desplegar→compartir). | **Abierto** |
+### 4.4 UX, accesibilidad e i18n
+
+| ID | Sev. | Hallazgo | Evidencia | Impacto |
+|---|---|---|---|---|
+| **UX-13** | Alta | Operaciones destructivas sin confirmación (borrar proyecto, quitar despliegue) y diálogo de «New» con semántica invertida. | `composeRow.tsx:24-64`; `playGroundContent.tsx:133-142` | Pérdida de datos |
+| **UX-14** | Media | Cadenas en inglés hardcodeadas en una app bilingüe (settings, playground, errores); **0 `aria-label`** en botones solo-icono; foco y contraste irregulares. | `components/display/settings.tsx`, `playGroundContent.tsx`, `composeRow.tsx` | i18n incompleta; app no navegable con lector de pantalla |
+| **UX-15** | Media | Errores de despliegue crudos («Bind for ... failed»), reasignación de puertos solo por toast y sin resumen previo; el usuario no puede elegir. | `playGroundContent.tsx:361-387` | Difícil de diagnosticar |
+| **UX-16** | Media | Compartir no advierte de que el enlace incluye variables de entorno; no hay revocación desde el visor ni caducidad. | `actions/composeActions.ts:50-61`; `share/page.tsx` | Fuga de credenciales por compartir |
+| **UX-17** | Media | Los stubs (nodos remotos, Google Drive, métricas HA, reapply limits) parecen features funcionales. | Ver FUNC-14 | Expectativas falsas |
+| **UX-18** | Baja | Estados de carga/error/empty inconsistentes entre portada y dashboard; varios `catch` solo hacen `console.error`. | `app/[locale]/page.tsx`, `dashboard/(dashboard)/page.tsx`, `projectMonitor.tsx` | Pantallas en blanco sin explicación |
+| **UX-19** | Baja | El flujo CLI pasa el token por query string a `http://localhost:5555` fijo y no explica el estado. | `app/[locale]/login/cli/page.tsx`; `app/api/auth/external/cli/route.ts:54-56` | Token en historial; no funciona en remoto |
+| **UX-20** | Baja | Dos implementaciones del listado de proyectos con distinto logout/errores. | `app/[locale]/page.tsx` vs `dashboard/(dashboard)/page.tsx` | Comportamiento impredecible |
+| **UX-21** | Baja | No se respeta `prefers-reduced-motion`; animaciones `animate-pulse`/`animate-liquid` permanentes; textos `text-slate-500` pequeños sobre fondo oscuro. | `playGroundContent.tsx`, `UnifiedLayout.tsx` | Accesibilidad y legibilidad |
+
+### 4.5 Arquitectura y mantenimiento
+
+| ID | Sev. | Hallazgo | Evidencia | Impacto |
+|---|---|---|---|---|
+| **ARC-01** | Alta | Hay **dos layouts que renderizan `<html>` y `<body>`**: el raíz y el de `[locale]`. El HTML resultante está anidado e inválido, `lang` se aplica al `<html>` interno y los providers quedan dentro de un segundo `<body>`. | `app/layout.tsx:45-52`; `app/[locale]/layout.tsx:48-76` | Hidratación/SEO/accesibilidad; estructura HTML inválida |
+| **ARC-02** | Media | Helpers privilegiados viven en módulos `'use server'` (`registerComposeWithoutMetadata`, `getGithubAccesToken`, `AuthWithGithub`), violando la regla del proyecto de no exportar privilegios desde actions. | `actions/userActions.ts:185`; `actions/github.ts:18,36` | Superficie de ataque y acoplamiento |
+| **ARC-03** | Media | Duplicación y código muerto: `actions/exportActions.ts` ≡ `app/actions/exportActions.ts`; `searchDockerHub` y `dockerSearch`; `export-render` inalcanzable; `exportPlaygroundAsPNGToFile` sin uso. | Ver archivos citados | Mantenimiento y confusión |
+| **ARC-04** | Baja | `next.config.mjs` ignora errores de tipos/lint en build y `ensureAuth` devuelve un usuario falso si `npm_lifecycle_event=build`. | `next.config.mjs:38-46`; `lib/auth.ts:13-16` | Builds “verdes” con código roto; bypass si el entorno se manipula |
+| **ARC-05** | Baja | `any` abundante, ausencia de una capa de dominio para Compose/HA y `lib/metadata.ts` importa un store de cliente. | `actions/*`, `lib/metadata.ts:11,61-63` | Difícil testear en servidor; regresiones |
+| **ARC-06** | Baja | No hay `audit_log`, esquema/migraciones documentadas ni runbook de backups/restauración. | — | Operación y respuesta a incidentes |
 
 ---
 
-## 5. Diseño de usabilidad
+## 5. Diseño de corrección
 
-### 5.1 Objetivos
+El orden de las secciones es el orden de implementación recomendado. Cada diseño incluye el
+contrato y los criterios de aceptación; el plan por fases está en §6.
 
-1. **Nunca perder trabajo.** El estado del proyecto debe ser explícito y recuperable.
-2. **Nunca mentir al usuario.** Si una acción falla, decir qué falló y cómo recuperarse; no mostrar diálogos de registro a quien ya inició sesión.
-3. **Consistencia bilingüe (es/en)** y accesibilidad WCAG 2.1 AA en los flujos principales.
-4. **Previsibilidad en operaciones destructivas**: confirmación explícita, reautenticación y resumen de impacto.
+### 5.1 Modelo de autorización y propiedad (SEC-23, SEC-24, SEC-25, ARC-02)
 
-### 5.2 Flujo de guardado (diseño propuesto)
+**Objetivo:** que ninguna acción de Docker pueda operar sobre un recurso que el usuario no
+posee, y que las operaciones de host exijan rol `admin`.
 
-Estado del proyecto en el playground:
+**Nuevo módulo `lib/authorization.ts`** (NO `'use server'`):
+
+```ts
+export type Session = { userId: ObjectId; email: string; role: 'admin' | 'user' };
+
+export async function requireUser(): Promise<Session> { /* jwtVerify + lookup role */ }
+export async function requireAdmin(): Promise<Session> { /* role === 'admin' */ }
+
+/** Carga el compose verificando propiedad; lanza 404 genérico si no es del usuario. */
+export async function requireCompose(composeId: string, session: Session) {
+  assertComposeId(composeId);
+  const doc = await getDb().collection('composes').findOne({
+    _id: new ObjectId(composeId), userId: session.userId,
+  });
+  if (!doc) throw new ActionError('COMPOSE_NOT_FOUND'); // sin filtrar si existe
+  return doc;
+}
+```
+
+**Reglas por acción**
+
+| Acción | Autorización |
+|---|---|
+| `runCompose`, `restartCompose`, `stopCompose`, `getComposeStatus`, `getComposeLogs`, `getComposeStats` | `requireUser` + `requireCompose` |
+| `shareCompose`, `deleteShareById`, `deleteCompose` | `requireUser` + propiedad (ya existe en share; aplicar a delete) |
+| `getHAStatus`, `simulateFailover`, backups, pool | `requireUser` + `requireCompose` (ya existe; mantener) |
+| `stopContainer`, `removeContainer`, `removeVolume`, `execDockerCommand` | `requireAdmin` + etiqueta `com.expanse.owner` o prefijo `expanse-project_`; el resto requiere `ADMIN_ALLOW_HOST_OPS=true` |
+| `stopProjectByName`, `removeProjectByName` | `requireAdmin` + `project.startsWith('expanse-project_')` salvo flag explícito |
+| `getGlobalDockerStats`, `getSystemInfo`, `getLocalImages`, `pullDockerImage` | `requireAdmin` (o `user` con vista de solo lectura configurable) |
+| APIs CLI | `requireUser` desde el JWT; nunca aceptar `userId` del cuerpo |
+
+**Etiquetado de despliegues:** al hacer `up`, inyectar en cada servicio:
+
+```yaml
+labels:
+  com.expanse.owner: <userId>
+  com.expanse.compose: <objectId>
+```
+
+Las operaciones por contenedor/volumen comprueban la etiqueta antes de actuar. Esto además
+permite distinguir contenedores de Expanse de los del host en `/deploy/settings`.
+
+**Criterios de aceptación**
+
+- [ ] Un usuario B recibe `COMPOSE_NOT_FOUND` al invocar cualquier acción con el id de A.
+- [ ] `removeProjectByName('portainer')` falla salvo admin con flag explícito.
+- [ ] `execDockerCommand` exige admin y deja registro en `audit_log`.
+- [ ] Tests: `tests/security/authorization.test.ts` cubre matriz completa.
+
+### 5.2 Política de Compose seguro (SEC-22)
+
+**Objetivo:** que el YAML que llega del cliente se valide antes de escribirse o ejecutarse.
+
+**Nuevo módulo `lib/composePolicy.ts`** (puro, testeable sin Docker):
+
+```ts
+export type PolicyResult = { ok: true } | { ok: false; code: string; path: string; message: string };
+
+const DENY_TOP_LEVEL = ['secrets']; // revisar caso a caso
+const DENY_SERVICE_KEYS = ['privileged', 'cap_add', 'devices', 'pid', 'ipc', 'uts', 'userns_mode'];
+const DENY_NETWORK_MODES = ['host', 'none']; // `service:` y `container:` permitidos con validación
+const FORBIDDEN_MOUNTS = ['/', '/etc', '/root', '/home', '/var/run/docker.sock', '/proc', '/sys', '..'];
+
+export function validateComposePolicy(doc: unknown, opts: { allowHostMounts: boolean }): PolicyResult {
+  // 1. esquema con zod (services/networks/volumes objetos; keys válidas)
+  // 2. denegar privileged/cap_add/devices/pid/ipc/network_mode host
+  // 3. validar binds: rechazar rutas absolutas sensibles y `..`
+  // 4. denegar build.context fuera de un directorio permitido (si se permite build)
+  // 5. denegar `extends` a ficheros externos y `env_file` fuera del proyecto
+  // 6. limitar tamaño (nº servicios, longitud de claves/valores)
+}
+```
+
+**Flujo de despliegue**
 
 ```
-[Sin sesión] --editar--> [Borrador local]
-     |                        |
-     |-- Guardar --> Diálogo de registro/login (embebido, con "Ya tengo cuenta" visible)
-     |
-[Con sesión] --editar--> [Cambios sin guardar] --2 s--> [Guardando] --> [Guardado]
-                               |                              |
-                               |                              +--> error: [Reintentar] + detalle
-                               +--> navegar: confirmación explícita (no beforeunload)
+YAML cliente
+  → YAML.parse (try/catch → ACTION_ERROR)
+  → validateComposePolicy (rechazo con código y ruta, sin ejecutar)
+  → patchComposeYaml (nombres + healthchecks + límites)
+  → normalizeComposeNames
+  → docker compose config --quiet (validación real del CLI)
+  → docker compose up -d
 ```
 
-Requisitos:
+`docker compose config --quiet` antes de `up` convierte errores de sintaxis en mensajes
+accionables y evita escribir ficheros inválidos. La política debe aplicarse también a
+`restartCompose`, `validateComposePorts` y `generateHAComposeAction`.
 
-- Indicador persistente `Guardado / Guardando… / Sin guardar / Error` con hora del último guardado.
-- Cancelación del debounce al cambiar de proyecto (implementado) y **control de versión**: enviar `updatedAt` esperado; el servidor rechaza (`409`) si cambió (pendiente).
-- `beforeunload` con `fetch(..., {keepalive:true})` o `navigator.sendBeacon` (pendiente).
-- Autoguardado activo por defecto para usuarios autenticados (implementado).
-- Recuperación de borrador en `localStorage` si se cierra la pestaña sin sesión (propuesta).
+**Criterios de aceptación**
 
-### 5.3 Mensajes y estados
+- [ ] Un Compose con `privileged: true`, `network_mode: host`, `cap_add`, `devices` o
+  `- /:/host` se rechaza con código `COMPOSE_POLICY_DENIED`.
+- [ ] Tests unitarios de cada regla y de una lista de casos legítimos (WordPress + MariaDB,
+  Postgres HA, bind a `./data`).
+- [ ] El error mostrado al usuario es un código i18n, no el mensaje interno.
 
-| Situación | Patrón |
+### 5.3 Endurecimiento de autenticación y sesión (SEC-21, SEC-26, SEC-27, SEC-28, SEC-29, SEC-33)
+
+1. **Registro en un solo camino.** `registerUser` valida y crea; `createOrLoginUser` deja de
+   exportarse desde `'use server'` y se mueve a `lib/authUsers.ts` (helper interno). Añadir
+   comprobación de `DISABLE_SIGNUP` y rate limit por IP también en OAuth.
+2. **Primer admin atómico.** Crear el admin inicial en la instalación (`pnpm create-admin`) o
+   con un `insertOne` condicionado a `countDocuments()===0` + índice único en `role: admin`
+   (o un lock en `settings`). Nunca decidir el rol con una lectura no atómica.
+3. **Códigos CSPRNG.** `crypto.randomBytes(32).toString('base64url')`; mantener TTL y borrado
+   de un solo uso. Añadir `sessionVersion` al usuario y al JWT; incrementarlo al resetear la
+   contraseña y en «cerrar todas las sesiones».
+4. **Rate limit correcto.** Configurar `TRUST_PROXY=true` solo detrás de proxy; si no, usar la
+   IP del socket. Purgar buckets vencidos cada minuto y limitar el número de claves.
+5. **API JWT.** Reutilizar `loginCredentialsSchema`, `emailSchema`, `rateLimit` y comprobar
+   `user.password` antes de `bcrypt.compare`; parsear Basic Auth con
+   `Buffer.from(b64,'base64').toString().split(/:(.*)/s)`.
+6. **Tokens de API separados** del JWT de sesión: `scope: 'cli'`, expiración corta y
+   revocables por `sessionVersion`.
+
+**Criterios de aceptación**
+
+- [ ] Con `DISABLE_SIGNUP=true`, ni la acción ni OAuth crean usuarios.
+- [ ] `/api/auth/jwt` devuelve 429 tras N intentos y 401 uniforme.
+- [ ] Reset de contraseña invalida sesiones previas (test con dos tokens).
+- [ ] Dos registros concurrentes en BD vacía producen **un** admin.
+
+### 5.4 Rediseño de alta disponibilidad (FUNC-01, FUNC-02, FUNC-03)
+
+**Persistencia**
+
+- Añadir a `composes`: `haConfig: DatabaseHAConfig | null`, `haEnabled: boolean`,
+  `haUpdatedAt: number`.
+- `runCompose`/`registerCompose` reciben `haConfig` y lo guardan con el resto del proyecto.
+- `restartCompose` reutiliza la config persistida; la UI deja de ser la única fuente.
+
+**Generador (corregir `lib/metadata.ts`)**
+
+| Problema | Corrección |
 |---|---|
-| Error de validación | Mensaje junto al campo (no toast), con el texto del esquema |
-| Error de red/acción | Toast + panel con "Reintentar" y referencia (`digest`) |
-| Operación larga (deploy) | Fases (`validando → escribiendo → arrancando → listo`) + acceso a logs |
-| Recurso inexistente | Página/estado dedicado con acción de salida (implementado en share) |
-| Sesión expirada | Redirigir a login preservando `?next=` (hoy se pierde el destino) |
+| Red `overlay` | Usar `bridge` en Compose normal; `overlay` solo si `isSwarm()` |
+| `5432:5432` en tres servicios | Publicar solo en HAProxy (o ninguno); usar red interna |
+| Imagen `postgres` sin Patroni | Imagen `ghcr.io/zalando/patroni` (o `bitnami/patroni`) + `command` y config montada; healthcheck real |
+| `depends_on: haproxy` incondicional | Generar `depends_on` según LB/pool activos |
+| `deploy.placement`, `{{.Task.Slot}}` | Solo en swarm; eliminarlos en modo Compose |
+| Credenciales hardcodeadas | Derivar de `POSTGRES_*` del Compose o pedirlas en el diálogo; nunca `postgres/postgres` |
+| Puertos de HAProxy/PgBouncer | Asignar puertos libres con `getAvailablePort` en servidor |
 
-### 5.4 Internacionalización
+**Estado y métricas**
 
-- Regla: ninguna cadena visible hardcodeada. Claves en `messages/{en,es}.json`.
-- Los mensajes de error de Server Actions deben devolver **códigos**, no texto en inglés, y traducirse en el cliente.
-- Validar el locale en middleware (implementado) y usar `<html lang>` correcto.
+- `getHAStatus`: indexar `docker compose ps` por campo `Service`, no por `Name`
+  (`db-primary`, `db-replica`, `pgbouncer`, `haproxy`). Si no hay datos, devolver
+  `unknown` explícito, no `critical`.
+- Métricas: leer `SHOW STATS` de PgBouncer y parsear columnas reales; si no está disponible,
+  ocultar el panel en vez de devolver ceros.
+- Restauración: usar `dbUser`/`dbName` de la configuración, no constantes.
 
-### 5.5 Accesibilidad
+**Criterios de aceptación**
 
-- `aria-label` en todos los botones solo-icono; `alt` descriptivo en imágenes.
-- Foco visible, navegación completa por teclado en canvas (selección, mover nodo, abrir panel).
-- Contraste mínimo 4.5:1 en texto pequeño (varios `text-slate-500` sobre fondo oscuro están por debajo).
-- Respetar `prefers-reduced-motion` en animaciones del playground.
+- [ ] `generateHACompose` con LB+pool+backup produce un YAML que pasa
+  `docker compose config --quiet` y `docker compose up -d` en un runner sin swarm.
+- [ ] Desplegar con HA, recargar la página y reiniciar conserva la configuración.
+- [ ] `getHAStatus` refleja `running` cuando los contenedores están arriba.
 
-### 5.6 Operaciones destructivas
+### 5.5 Guardado, concurrencia y resiliencia (STB-13, STB-14, STB-15, STB-16, STB-17, STB-18)
 
-- Diálogo con nombre del recurso, impacto ("se borrarán 3 volúmenes"), checkbox de confirmación.
-- **Reautenticación server-side** (`verifyUserPassword` dentro de la acción) para borrar proyectos/volúmenes y para `failover`/`restore`.
-- Etiquetar claramente qué contenedores pertenecen a Expanse y cuáles son del host.
+1. **Control de versión optimista.** `registerCompose` recibe `expectedUpdatedAt`; el update
+   usa `{ _id, userId, updatedAt: expected }`. Si `matchedCount === 0`, devolver
+   `CONFLICT` (409) y ofrecer «recargar / sobrescribir / fusionar». El cliente conserva
+   `updatedAt` del último guardado.
+2. **Guardado fiable al cerrar.** Sustituir el `fetch` de `beforeunload` por
+   `navigator.sendBeacon` a un endpoint autenticado por cookie, o mantener un borrador en
+   `localStorage` y reconciliarlo al volver. Añadir estado visible
+   `Guardado / Guardando / Sin guardar / Error` con hora.
+3. **Screenshot bajo demanda.** No capturar el canvas en cada autoguardado: generar la
+   miniatura al guardar manualmente o cada N minutos, con `pixelRatio: 1`, ancho máximo
+   1600 px y límite de tamaño; si excede, omitir sin fallar el guardado.
+4. **Un lock por compose.** `Map<composeId, Promise>` en el proceso (o lock en Mongo) para
+   serializar Run/Restart/Stop; el botón se deshabilita mientras hay una operación.
+5. **Mongo robusto.** `serverSelectionTimeoutMS: 5000`, `connectTimeoutMS: 5000`,
+   `maxPoolSize` explícito. `/api/ready` comprueba Mongo (`ping`) y socket Docker
+   (`docker version`), separado de `/api/ping`.
+6. **Timeouts por operación.** `ps/logs/stats`: 15 s; `up/down`: configurable (10 min);
+   `pull`: 30 min; exponer cancelación cuando sea posible.
+7. **Límites y retención.** `deploy.resources.limits` para app y Mongo; limpieza programada de
+   `/tmp/expanse-*` y `public/exports` (p. ej. 7 días); límite de tamaño por usuario.
 
-### 5.7 Criterios de aceptación (UX)
+### 5.6 Sesión y navegación en cliente (FUNC-09, FUNC-12, UX-20)
 
-- [x] Un usuario autenticado puede guardar sin ver formularios de registro.
-- [x] El dashboard lista proyectos existentes sin redirigir a login.
-- [x] Compartir un recurso borrado muestra un estado claro.
-- [ ] Cobertura i18n: 0 cadenas hardcodeadas en flujos principales.
-- [ ] 0 violaciones críticas de axe-core en login, dashboard y playground.
-- [ ] Prueba E2E de guardado y recuperación tras recarga.
+- **Eliminar `document.cookie`** como fuente de verdad. La portada y el dashboard deben
+  obtener la sesión del servidor (RSC) o de un endpoint `/api/session` que devuelva
+  `{ authenticated, email }` sin leer el token.
+- **Un solo dashboard.** Extraer `ProjectList` y `ProjectHeader` compartidos; la portada puede
+  ser pública con CTA, o redirigir en servidor a `/dashboard` si hay sesión.
+- **Logout único.** Llamar siempre a `logout()` (Server Action), que borra la cookie con
+  `cookies().delete` y redirige. Eliminar el borrado manual de `document.cookie`.
+- **Preservar destino.** Al redirigir a login desde una ruta protegida, conservar
+  `?next=`/`?data=` y restaurarlo tras autenticar.
+
+### 5.7 UX, accesibilidad e i18n (UX-13 a UX-21)
+
+- **Confirmaciones reales:** diálogo con nombre del recurso e impacto; «Cancelar» aborta la
+  acción. Separar «borrar fichero» de «detener/eliminar despliegue» y explicar la diferencia.
+  No borrar volúmenes sin checkbox explícito.
+- **i18n:** mover las cadenas de `settings`, `playground`, `composeRow`, `projectMonitor` y
+  errores a `messages/{en,es}.json`; los Server Actions devuelven códigos, el cliente traduce.
+- **Accesibilidad:** `aria-label` en todos los botones solo-icono, `aria-live` para estado de
+  deploy, foco visible, navegación por teclado en el canvas, contraste ≥ 4.5:1 y
+  `prefers-reduced-motion`.
+- **Feedback de deploy:** fases (`validando → escribiendo → arrancando → listo`), resumen de
+  puertos reasignados antes de confirmar y enlace a logs en el error.
+- **Share seguro:** advertencia explícita de que el enlace incluye variables de entorno;
+  opción «ocultar valores sensibles» en el YAML público; botón de revocar; caducidad y token
+  firmado (P2).
+- **Stubs:** eliminar o marcar claramente como «próximamente» y deshabilitar el botón
+  (Google Drive, nodos remotos, pool metrics, reapply limits).
+
+### 5.8 Observabilidad y operación (STB-19, STB-21, ARC-06)
+
+- Logger JSON con nivel, `requestId`, `userId` hash y redacción de claves
+  (`password`, `token`, `secret`, `DATABASE_URL`).
+- `audit_log`: `userId`, acción, recurso, resultado, IP y timestamp para login, deploy,
+  borrados, failover/restore y operaciones de host.
+- `/api/ready` + healthcheck del compose que lo use.
+- Runbook de backup/restauración de Mongo y rotación de `SECRET_KEY`.
+
+### 5.9 Limpieza técnica (ARC-01 a ARC-05, FUNC-14)
+
+- **Un solo `<html>`/`<body>`.** Dejar `app/layout.tsx` con `<html lang>` (obtenido del
+  segmento) y `<body>`; `app/[locale]/layout.tsx` solo con providers. Alternativa: mover
+  providers al layout raíz con `getLocale()`.
+- Mover helpers privilegiados fuera de `'use server'`: `lib/authUsers.ts`, `lib/github.ts`.
+- Eliminar `actions/exportActions.ts` duplicado, `export-render` inalcanzable,
+  `exportPlaygroundAsPNGToFile` sin uso y unificar `searchDockerHub`/`dockerSearch`.
+- Corregir la comprobación de versión a `Dinamicas-Electronicas/expanse` o eliminarla.
+- Quitar `ignoreBuildErrors`/`ignoreDuringBuilds` cuando CI esté verde; eliminar el stub de
+  `ensureAuth` en build usando datos de prueba explícitos.
+- Cachear la biblioteca (142 JSON) en memoria con invalidación por `mtime`.
 
 ---
 
-## 6. Diseño de estabilidad
+## 6. Plan de implementación
 
-### 6.1 Modelo de fallos
+### P0 — bloquea exponer la instancia a Internet
 
-| Componente | Fallo | Comportamiento actual | Objetivo |
-|---|---|---|---|
-| MongoDB | Caída | Peticiones lentas (30 s) y error genérico | Timeout 5 s, reintento acotado, mensaje "base de datos no disponible" |
-| Docker daemon | Caída | Error de acción con mensaje de docker | Estado degradado visible, sin reintentos infinitos |
-| Docker command | Timeout | 30 min (nuevo) | Timeout configurable por operación + cancelación |
-| Server Action | Payload > límite | Error genérico | Límite 4 MB (hecho) + compresión/recorte de screenshot |
-| Navegador | Cierre | Guardado asíncrono puede perderse | `keepalive`/`sendBeacon` |
-| Two tabs | Edición concurrente | Sobrescritura silenciosa | Control de versión (`409` + merge manual) |
-| Disco | `/tmp`, exports | Crecimiento ilimitado | Retención + limpieza periódica |
+| # | Tarea | IDs | Esfuerzo | Criterio de aceptación |
+|---|---|---|---|---|
+| 1 | Autorización por recurso + RBAC + etiquetas de propiedad | SEC-23/24/25 | M | Un usuario no opera recursos ajenos; tests de matriz |
+| 2 | Política de Compose + `docker compose config` previo | SEC-22 | M | Casos peligrosos rechazados; stacks legítimos pasan |
+| 3 | Cerrar registro y endurecer auth/API/reset | SEC-21/26/27/28/33 | M | `DISABLE_SIGNUP` efectivo en todos los caminos; 429; sesión revocada |
+| 4 | Corregir portada/logout y sesión cliente | FUNC-09 | S | Portada lista proyectos; logout cierra sesión |
+| 5 | Persistir HA y arreglar generador/estado | FUNC-01/02/03 | L | `up -d` HA funciona y sobrevive a recarga/reinicio |
+| 6 | Confirmaciones destructivas | UX-13/FUNC-06/07 | S | Cancelar aborta; borrado pide confirmación |
+| 7 | Telemetría opt-in, versión correcta, CSP | SEC-32/36 | S | Sin peticiones a terceros salvo consentimiento; CSP activa |
 
-### 6.2 Integridad de datos
+### P1 — siguiente iteración (2–4 semanas)
 
-- Índices y unicidad: `users.email` único, TTL en `reset_code`/`csrf_token` (implementado).
-- Toda consulta de un recurso de usuario incluye `userId` (composes, shares, HA).
-- Guardado con **versión optimista**: `updateOne({_id, userId, updatedAt: expected})`; si `matchedCount=0` → `409 Conflict`.
-- Migración recomendada: normalizar emails a minúsculas **antes** de desplegar el índice único en bases con datos previos.
-- Backup: documentar `mongodump` diario y probar restauración (hoy no hay estrategia).
-
-### 6.3 Concurrencia y trabajos en segundo plano
-
-- Polling con backoff exponencial, pausa con `document.hidden` y un único intervalo por dominio.
-- Icon sync: intervalo de 24 h sin `unref` (mantiene el proceso despierto, irrelevante en servidor).
-- Deploy: operaciones idempotentes (`up -d` es idempotente) y bloqueo por compose para evitar dobles clics concurrentes.
-- Registro de operaciones: tabla/colección `audit_log` con `userId`, acción, recurso, resultado.
-
-### 6.4 Observabilidad
-
-- Logs JSON con nivel, `requestId`, `userId` (hash) y redacción de secretos.
-- `/api/ping` (liveness) + `/api/ready` (comprueba Mongo y socket Docker).
-- Métricas: latencia de acciones, errores por acción, duración de deploys, tamaño de screenshots.
-
-### 6.5 Límites y capacidad
-
-- Añadir `deploy.resources.limits` al compose de la app y de Mongo; `mem_limit` como red de seguridad.
-- Limitar tamaño del screenshot (p. ej. 1600×1000 y `toPng` con `pixelRatio: 1`).
-- Limitar número de stacks/volúmenes por usuario en despliegues multi-tenant.
-
-### 6.6 Criterios de aceptación (estabilidad)
-
-- [x] Dashboard lista proyectos con datos existentes.
-- [x] Cambiar de proyecto no puede escribir en el proyecto nuevo.
-- [x] Guardados grandes (>1 MB) funcionan.
-- [x] Índices/TTL creados al arrancar.
-- [ ] Prueba de caos: Mongo caído 30 s y recuperación sin reinicio.
-- [ ] Prueba de concurrencia: dos pestañas editando el mismo proyecto → `409` y merge.
-- [ ] Retención de exports y `/tmp` implementada.
-
----
-
-## 7. Diseño de seguridad
-
-### 7.1 Modelo de amenazas
-
-| Actor | Capacidad | Objetivo |
+| # | Tarea | IDs |
 |---|---|---|
-| Anónimo en Internet | Sin cuenta | Leer datos privados, crear cuentas, DoS |
-| Usuario autenticado | Cuenta propia | Leer/escribir proyectos ajenos, ejecutar comandos en el host |
-| Operador legítimo | Admin del host | Gestionar stacks |
-| Cadena de suministro | Dependencia/script comprometido | Ejecución de código en el servidor o en el navegador |
-
-**Supuesto clave:** la app es, por diseño, **una consola de administración de Docker**. Autenticarse = poder de root sobre el host (socket). Por tanto, "registro público" y "multi-tenant" no son compatibles sin un rediseño de aislamiento.
-
-### 7.2 Autenticación y sesión
-
-Estado actual (tras los cambios):
-
-- JWT HS256 firmado con `SECRET_KEY`, 30 días, cookie `HttpOnly; SameSite=Lax; Secure` (si HTTPS).
-- `ensureAuth()` en acciones; middleware valida en rutas de página.
-- Login/registro/reset con límite en memoria.
-
-Diseño objetivo:
-
-1. **Sesiones revocables**: campo `sessionVersion` en `users`; el JWT lo incluye y middleware/acciones lo comparan (permite logout global y revocar tras cambio de contraseña).
-2. **Duración**: access token 12 h + refresh rotatorio 30 días; cookie `__Host-token` (HTTPS).
-3. **MFA TOTP** opcional para el primer usuario/admin.
-4. **Contraseñas**: mínimo 8 (hecho), recomendación 12; comparar contra lista de contraseñas comunes; bcrypt coste 12.
-5. **Reseteo**: invalidar `sessionVersion` al cambiar contraseña; códigos de un solo uso con TTL (hecho) y límite por email+IP.
-6. **Rate limiting distribuido** (Redis) con contador por IP y por cuenta; bloqueo temporal tras N fallos.
-7. **Registro**: por defecto **cerrado** en despliegues públicos (`DISABLE_SIGNUP=true`); alta del primer admin por CLI/`/setup` con token de instalación.
-
-### 7.3 Autorización
-
-Matriz actual (tras los cambios):
-
-| Recurso | Anónimo | Usuario autenticado |
-|---|---|---|
-| Compose propio | — | RW |
-| Compose ajeno | — | — (bloqueado por `userId`) |
-| Share público | R | R |
-| Crear share | — | Solo de proyectos propios |
-| HA (status/failover/backup/restore/config) | — | Solo propios |
-| Containers/volúmenes del host (deploy/settings) | — | **RW sobre todo el host** |
-| Terminal (`exec`) | — | **Ejecución en cualquier contenedor** |
-| Info del sistema | — | (antes anónimo) ahora autenticado |
-
-Diseño objetivo:
-
-1. **RBAC real**: `role` (`admin`/`operator`/`viewer`) evaluado en servidor. Las acciones de host exigen `admin`; las de proyecto exigen propiedad.
-2. **Etiquetar despliegues**: al hacer `up`, inyectar `labels: com.expanse.owner=<userId>` y `com.expanse.compose=<id>`; `stopContainer`, `removeContainer`, `removeProjectByName`, `execDockerCommand` verifican la etiqueta antes de operar.
-3. **Aislar el socket**: `docker-socket-proxy` con allowlist de endpoints (`containers`, `images`, `networks`, `volumes`) y denegar `exec`, `swarm`, `system`; o Daemon API por mTLS. El proceso web no debe ser root.
-4. **Validar el compose antes de desplegar** contra el esquema de Compose y una allowlist de:
-   - rutas de bind mounts (prohibir `/`, `/etc`, `/root`, `/var/run/docker.sock`, `..`);
-   - `privileged: true`, `cap_add`, `pid: host`, `network_mode: host`, `devices`;
-   - imágenes con `build:` locales fuera de un directorio permitido.
-5. **Reautenticación** server-side para acciones destructivas de host y HA.
-
-### 7.4 Secretos y datos
-
-- Secretos solo por entorno; nunca en logs (corregido para GitHub/reset).
-- Redacción centralizada en logger; prohibir `console.log` de objetos de configuración.
-- **Rotar** `GITHUB_CLIENT_SECRET`/tokens si se conservaron logs antiguos.
-- Credenciales de nodos remotos cifradas en reposo (hoy el stub no guarda nada).
-- Compartir proyectos: enlaces con **token firmado y caducable**, opción de revocar y de proteger con contraseña (hoy el `shareId` es permanente y público).
-- Exportaciones PNG: nombres por checksum (hecho) y retención; no servir archivos no generados por la app.
-
-### 7.5 Aislamiento de Docker (SEC-13)
-
-Opción A (mínima, recomendada para self-hosted):
-
-1. `DISABLE_SIGNUP=true` por defecto en el compose.
-2. Crear el primer admin durante la instalación.
-3. Exigir HTTPS (`URL=https://…`) → cookies `Secure` + HSTS.
-4. Restringir `saveRemoteNodeConfig` (stub) y documentar que la app equivale a root.
-
-Opción B (multi-tenant real, esfuerzo alto):
-
-1. Socket proxy + usuario sin root + RBAC + etiquetas de propiedad.
-2. Un daemon Docker por tenant (Docker-in-Docker/rootless) o un orquestador por usuario.
-3. Cuotas y límites de recursos por usuario.
-
-### 7.6 Cadena de suministro
-
-- `pnpm audit` en CI (hecho) + Dependabot/Renovate.
-- Escaneo de imagen (Trivy/Grype) en CI y firma (cosign/SBOM).
-- Eliminar el script `opentech-ux.org` o cargarlo solo con consentimiento explícito y `integrity` (SRI). Bloquearlo con CSP si se mantiene.
-- Pinear imágenes por digest (`mongo:7.0@sha256:…`) y `pnpm` por versión exacta (hecho).
-
-### 7.7 Cabeceras y navegador
-
-Implementadas: `nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, `X-DNS-Prefetch-Control`, HSTS condicional.
-
-Pendiente: **CSP con nonce** (`script-src 'self' 'nonce-…'`), `frame-ancestors`, `base-uri 'none'`, `form-action 'self'`. Requiere revisar los scripts inline de Next y la telemetría externa.
-
-### 7.8 Registro y respuesta a incidentes
-
-- Auditar: login (éxito/fallo), cambios de contraseña, borrados, deploys, failover/restore, cambios de configuración de host.
-- Alertar: picos de 401/429, errores 5xx, tamaño anómalo de body, comandos `exec`.
-- Procedimiento documentado: rotar `SECRET_KEY` (invalida todas las sesiones), rotar secretos OAuth/Brevo, revisar `audit_log`, reconstruir la imagen.
-
-### 7.9 Criterios de aceptación (seguridad)
-
-- [x] Ninguna Server Action devuelve datos de otro usuario.
-- [x] Ninguna Server Action confía en flags del cliente para autenticar.
-- [x] Cookie con `HttpOnly` + `SameSite` + `Secure` condicional.
-- [x] APIs con validación de ObjectId y errores sin detalles internos.
-- [x] `pnpm audit` sin hallazgos.
-- [ ] Rate limiting compartido y bloqueo de cuenta.
-- [ ] Sesiones revocables y MFA para admin.
-- [ ] CSP y eliminación/opt-in de telemetría externa.
-- [ ] RBAC + etiquetas de propiedad en acciones Docker.
-- [ ] Socket proxy / rootless.
-
----
-
-## 8. Cambios implementados en este ciclo
-
-### Seguridad
-
-| Archivo | Cambio |
-|---|---|
-| `lib/oauth.ts` (nuevo) | Login/registro OAuth fuera del módulo `'use server'` |
-| `actions/userActions.ts` | `createOrLoginUser` solo con contraseña; validación zod; rate limit; cookie segura; IDOR de compose público cerrado; reset con 8 caracteres |
-| `lib/session.ts` (nuevo) | Construcción de cookie y token centralizada |
-| `lib/rateLimit.ts` (nuevo) | Limiter en memoria |
-| `lib/validation.ts` (nuevo) | Esquemas reutilizables (email, ObjectId, registro) |
-| `lib/dbIndexes.ts` (nuevo) | Índices y TTL idempotentes |
-| `actions/composeActions.ts` | Propiedad al compartir; solo shares públicos; validación de IDs |
-| `actions/databaseHA.ts` | Ownership en todas las operaciones; fix `doc.data` |
-| `actions/systemActions.ts` | `ensureAuth` y sin log de configuración |
-| `app/api/auth/external/*` | Sin log del token; usa `lib/oauth` |
-| `app/api/export/png/route.ts` | BD correcta, validación, solo públicos, errores genéricos |
-| `app/api/compose/route.ts` | Validación y manejo de errores |
-| `app/api/logos/library/[name]/route.ts` | Allowlist + contención de ruta |
-| `middleware.ts` | Locale soportado, `/deploy` protegido, sin bucle si falta `SECRET_KEY` |
-| `next.config.mjs` | Cabeceras de seguridad, `poweredByHeader:false`, body limit 4 MB |
-| `lib/brevo.ts`, reset page | Sin secretos en logs |
-
-### Usabilidad y estabilidad
-
-| Archivo | Cambio |
-|---|---|
-| `app/[locale]/page.tsx` | Corregido el `ReferenceError` (TDZ) del listado |
-| `components/playground/playGroundContent.tsx` | Habilita guardado/autoguardado con sesión válida |
-| `store/compose.ts` | Guardado con `id` capturado, cancelación al cambiar de proyecto |
-| `app/[locale]/error.tsx`, `not-found.tsx` (nuevos) | Estados de error/404 |
-| `app/[locale]/share/error.tsx`, `components/playground/asyncReadonlyPlayground.tsx` | Sin filtrar `error.message`; share inexistente con mensaje |
-| `instrumentation.ts` | Bootstrap de índices |
-
-### Pruebas añadidas
-
-- `tests/actions/auth.test.ts` — regresión de account takeover (6 casos).
-- `tests/lib/session.test.ts` — atributos de cookie.
-- `tests/lib/rateLimit.test.ts` — ventana y límites.
-- `tests/lib/validation.test.ts` — ObjectId y política de contraseñas.
-
----
-
-## 9. Backlog priorizado
-
-### P0 — antes de exponer la instancia a Internet
-
-| # | Tarea | Criterio de aceptación |
-|---|---|---|
-| 1 | `DISABLE_SIGNUP=true` por defecto + alta del primer admin por instalación | Sin registro público salvo opt-in explícito |
-| 2 | RBAC real y etiquetas de propiedad en acciones Docker | Un usuario no puede operar contenedores ajenos (test) |
-| 3 | Socket proxy/rootless o documentar formalmente el riesgo y exigir admin | El proceso web no es root; `exec` deshabilitado por defecto |
-| 4 | Eliminar u opt-in la telemetría externa + SRI | Network log sin `opentech-ux.org` salvo consentimiento |
-| 5 | Rotar secretos que pasaron por logs | `GITHUB_CLIENT_SECRET`/tokens rotados |
-| 6 | HTTPS obligatorio en despliegues públicos | `URL` https, cookie `Secure`, HSTS |
-
-### P1 — siguiente iteración
-
-1. Sesiones revocables + expiración corta + logout global.
-2. Rate limiting distribuido y bloqueo de cuenta.
-3. CSP con nonce y `frame-ancestors`.
-4. Control de versión en guardado (`409` + merge) y `sendBeacon`.
-5. Timeouts/reintentos de Mongo y endpoint `/api/ready`.
-6. Reautenticación server-side en operaciones destructivas.
-7. i18n completo + accesibilidad (axe en CI).
-8. Límites de recursos y retención de exports/temporales.
-9. Logs estructurados con redacción + `audit_log`.
-10. E2E (Playwright) de los flujos críticos.
+| 8 | Concurrencia de guardado + `sendBeacon` + estado de guardado | STB-13 |
+| 9 | Mongo con timeouts, `/api/ready` y logs estructurados | STB-14/19/21 |
+| 10 | Puertos: parseo completo, reservas y verificación en host | FUNC-04 |
+| 11 | Polling con visibilidad/backoff y estado `isExecuting` derivado | FUNC-05/STB-18 |
+| 12 | Un lock por deploy y timeouts por operación | STB-16/17 |
+| 13 | i18n de cadenas restantes + accesibilidad + contraste | UX-14/21 |
+| 14 | Share con advertencia/revocación/redacción; stubs deshabilitados | SEC-30/UX-16/UX-17 |
+| 15 | Correcciones puntuales: email, image refs, revalidate, resetCompose, CLI API | FUNC-08/10/11/12/13 |
+| 16 | Limpieza ARC y duplicados; un layout raíz | ARC-01/02/03 |
+| 17 | Tests E2E Playwright (login→crear→guardar→deploy→share) | STB-20 |
 
 ### P2 — madurez
 
-1. MFA para administradores.
-2. Enlaces de compartición firmados, caducables y revocables.
-3. Backups de Mongo con restauración probada + runbook.
-4. Escaneo de imagen/SBOM/firma en CI.
-5. Multi-tenant con cuotas (si el producto lo requiere).
-6. Migración a una base de datos con transacciones para operaciones compuestas.
-
----
-
-## 10. Plan de pruebas
-
-### 10.1 Ejecutado
-
-- Unitarias: nombres Docker, sanitización, referencias, esquemas, rate limit, cookies, OAuth bypass.
-- Integración: 122 plantillas contra `docker compose config`; smoke real de Redis/PostgreSQL; YAML con red inválida.
-- Seguridad dinámica: Server Actions sin sesión, IDOR, bypass de locale, IDs malformados, cabeceras de cookie.
-- Build y arranque del contenedor, healthchecks y `/api/ping`.
-
-### 10.2 Pendiente
-
-| Tipo | Herramienta | Objetivo |
+| # | Tarea | IDs |
 |---|---|---|
-| E2E | Playwright | Registro→crear→guardar→recargar→desplegar→compartir |
-| Accesibilidad | axe-core / Lighthouse | 0 violaciones críticas |
-| Carga | k6 | Deploy concurrente, límites de body, rate limit |
-| Caos | Toxiproxy/iptables | Mongo/Docker caídos y recuperación |
-| Seguridad | ZAP baseline | XSS, CSRF, headers, open redirects |
-| Dependencias | Trivy + audit | 0 CVEs altas en imagen y lockfile |
+| 18 | `sessionVersion`, logout global, MFA TOTP opcional | SEC-28 |
+| 19 | Shares con token firmado, caducidad y contraseña | SEC-30 |
+| 20 | `audit_log` + alertas (401/429, 5xx, `exec`) | ARC-06 |
+| 21 | Límites de recursos, retención de exports/temporales, cuotas | STB-15 |
+| 22 | Socket proxy/rootless y separación del proceso web | SEC-24 |
+| 23 | Migraciones de esquema + backup/restore probado | STB-22/ARC-06 |
 
 ---
 
-## 11. Riesgos aceptados y decisiones
+## 7. Plan de pruebas y criterios de aceptación
 
-1. **Autoguardado en `disabled=false`**: se activa al confirmar sesión en el playground; si la comprobación falla por red, el usuario ve el diálogo de registro (comportamiento conservador). Se puede reintentar.
-2. **Rate limit en memoria**: suficiente para la instalación de referencia (un proceso). No protege múltiples réplicas; documentado como P1.
-3. **Emails en minúsculas**: los nuevos registros se normalizan; los existentes conservan su forma. Antes de activar el índice único en bases antiguas, ejecutar una migración de normalización.
-4. **`X-Frame-Options: SAMEORIGIN`** en lugar de `DENY` para permitir embeber el propio canvas si el producto lo necesita.
-5. **No se eliminó la telemetría externa**: es una decisión de producto; se documenta como P0 para instancias expuestas.
-6. **`execDockerCommand` sigue existiendo**: es una función del producto (terminal). Debe quedar detrás de rol admin y socket proxy.
+### 7.1 Tests nuevos obligatorios
+
+| Archivo | Cubre |
+|---|---|
+| `tests/security/authorization.test.ts` | Matriz usuario A/B/admin para cada acción Docker y de compose |
+| `tests/lib/composePolicy.test.ts` | `privileged`, `cap_add`, `devices`, `network_mode`, mounts sensibles, build, casos válidos |
+| `tests/security/auth.test.ts` | `DISABLE_SIGNUP` en acción y OAuth, rate limit, reset CSPRNG, revocación de sesión, admin único |
+| `tests/integration/haCompose.test.ts` | `generateHACompose` → `docker compose config --quiet` y `up -d` sin swarm; estado por `Service` |
+| `tests/lib/ports.test.ts` | Formatos `IP:host:container`, `/tcp`, rangos, reservas y no-duplicados |
+| `tests/lib/session.test.ts` (ampliar) | `sessionVersion`, cookie `__Host-` en HTTPS, revocación |
+| `tests/e2e/*.spec.ts` (Playwright) | Registro, guardado, recarga, deploy, share, logout |
+
+### 7.2 Definición de «corregido»
+
+Un hallazgo se cierra solo si:
+
+1. Existe un test que falla antes y pasa después (regresión).
+2. El mensaje al usuario es un código i18n, no un texto interno.
+3. Se registra en `audit_log` si es una operación sensible.
+4. `pnpm typecheck && pnpm lint && pnpm test && pnpm audit` siguen verdes.
+5. La documentación (`docs/SDD.md`, `README`, `CHANGELOG`) se actualiza.
+
+### 7.3 Pruebas de seguridad y caos pendientes
+
+- **ZAP baseline** sobre una instancia sembrada (XSS, CSRF, headers, open redirects).
+- **k6**: deploy concurrente, body de 4 MB, rate limit, 142 plantillas.
+- **Caos**: Mongo caído 30 s; Docker daemon caído; recuperación sin reinicio.
+- **Abuso**: intento de montar el socket, `privileged`, borrar proyectos del host,
+  invocar acciones con IDs ajenos.
 
 ---
 
-## Anexo A — Cómo reproducir la verificación
+## 8. Riesgos y decisiones abiertas
+
+1. **Producto mono-operador vs multi-tenant.** Todo el modelo P0 asume que autenticarse =
+   root. Si se quiere multi-tenant real, hacen falta socket proxy, contenedores rootless por
+   usuario y cuotas (esfuerzo alto, P2).
+2. **Compartir secretos.** Se propone advertir y permitir redactar valores; la alternativa es
+   prohibir compartir stacks con variables sensibles.
+3. **Alcance de HA.** El generador actual promete Patroni/etcd/HAProxy; se puede (a) repararlo
+   o (b) retirarlo de la UI hasta que esté probado. Recomendado: repararlo con tests reales.
+4. **Telemetría.** `opentech-ux.org` debe ser opt-in explícito; PostHog ya está detrás de
+   `DISABLE_TELEMETRY`.
+5. **Contraseñas existentes.** Mantener login con mínimo 6 para cuentas antiguas, pero elevar
+   el hash a bcrypt coste 12 en el próximo cambio de contraseña.
+6. **Compose `deploy:` en no-swarm.** Docker Compose ignora `deploy.replicas` sin swarm;
+   documentarlo o usar `--compatibility`/swarm según el caso.
+
+---
+
+## 9. Anexo A — Matriz actual de acciones y APIs
+
+| Endpoint / acción | Auth actual | Ownership | Admin | Objetivo |
+|---|---|---|---|---|
+| `createOrLoginUser` | — (crea usuario) | — | — | Solo login; registro interno |
+| `registerUser` | — | — | — | `DISABLE_SIGNUP` + rate limit |
+| `loginUser` | — | — | — | Rate limit + email normalizado |
+| `getAllMyComposeOrderByEditDate` | ✅ | ✅ | — | OK |
+| `getComposeById` | ✅ | ✅ | — | Validar ObjectId |
+| `registerCompose` | ✅ | ✅ | — | Versión optimista |
+| `deleteCompose` | ✅ | ✅ | — | Confirmar, cascada, validar |
+| `deleteUser` | ✅ | ✅ | — | Reauth + cascada + sin redirect externo |
+| `runCompose` | ✅ | ❌ | — | Ownership + política + lock |
+| `stopCompose` / `restartCompose` | ✅ | ❌ | — | Ownership |
+| `getComposeStatus` / `getComposeLogs` | ✅ | ❌ | — | Ownership |
+| `stopProjectByName` / `removeProjectByName` | ✅ | ❌ | ❌ | Admin + prefijo/label |
+| `stopContainer` / `removeContainer` / `removeVolume` | ✅ | ❌ | ❌ | Admin + label |
+| `execDockerCommand` | ✅ | ❌ | ❌ | Admin + audit |
+| `getGlobalDockerStats` / `getSystemInfo` | ✅ | — | ❌ | Admin o solo lectura |
+| `shareCompose` | ✅ | ✅ | — | Advertencia + revocación |
+| `getComposeByShareId` | público | — | — | Público por diseño |
+| `getAllMyShares` / `deleteShareById` | ✅ | ✅ | — | OK |
+| Acciones HA | ✅ | ✅ | — | Persistir config |
+| `getGithubAccesToken` | **público** | — | — | Mover a `lib/` |
+| `AuthWithGithub` | **público** | — | — | Mover a `lib/`/rate limit |
+| `/api/auth/jwt` | credenciales | — | — | Rate limit + parseo |
+| `/api/compose` GET | público (share) | — | — | OK; redactar secretos |
+| `/api/compose` POST / `machine` | JWT | ⚠️ userId del body (helper) | — | Derivar del token + validar |
+| `/api/export/png` | público (share) | — | — | OK |
+| `/api/logos/library/[name]` | público | — | — | OK (allowlist) |
+
+---
+
+## 10. Anexo B — Reproducción de la verificación
 
 ```bash
-# 1. Calidad y tests
-pnpm install --frozen-lockfile
-pnpm typecheck && pnpm lint && pnpm test
-pnpm audit --audit-level=low
+# Calidad (estado actual: todo verde)
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm audit --audit-level=high
 
-# 2. Build y arranque
-pnpm generate-secrets          # si no existe .env
-docker compose build app
-docker compose up -d
-docker compose ps
-curl -s http://127.0.0.1:4000/api/ping
-
-# 3. Cabeceras
-curl -sI http://127.0.0.1:4000/en | grep -iE "x-frame|nosniff|referrer|permissions"
-
-# 4. Rutas que antes fallaban
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:4000/api/compose?id=nope        # 400
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:4000/api/export/png?shareId=nope # 400
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:4000/en/deploy/settings          # 307 → /en
-
-# 5. Plantillas
-pnpm test:docker
+# Pruebas que debe añadir el plan (§7)
+pnpm vitest run tests/security tests/lib/composePolicy.test.ts tests/lib/ports.test.ts
+pnpm test:docker          # plantillas reales
+docker compose config --quiet  # sobre el YAML generado por HA
 ```
 
-## Anexo B — Entorno de referencia
+**Evidencias clave** (archivo:línea):
 
-- Node 24.20, pnpm 12.3.4, Next 15.5.29, React 19.3.1.
-- MongoDB 7.0 (contenedor), Docker Engine 29.1.3, Compose v5.4.0.
-- Contenedor de app: `node:24-alpine`, usuario `root`, socket Docker montado.
+- `actions/userActions.ts:33-82` — registro sin gate ni rate limit.
+- `actions/dockerActions.ts:37-190` — YAML sin política.
+- `actions/dockerActions.ts:193-341` — acciones de proyecto sin ownership.
+- `actions/dockerActions.ts:553-655,775-791` — operaciones de host sin RBAC.
+- `actions/userActions.ts:185-198` — `userId` como parámetro público.
+- `actions/github.ts:18-34` — token OAuth devuelto por una action.
+- `actions/databaseHA.ts:384-386,424-470` — HA inalcanzable/estado erróneo.
+- `lib/metadata.ts:492-663` — Compose HA no ejecutable en no-swarm.
+- `app/[locale]/page.tsx:38-42,141-147` — sesión `HttpOnly` y logout rotos.
+- `app/layout.tsx:45-52` + `app/[locale]/layout.tsx:48-76` — `<html>` anidado.
+- `lib/utils.ts:50-58,89-90` — `Math.random` y repositorio de versión incorrecto.
+- `lib/rateLimit.ts:13,47-52` — rate limit spoofeable/sin purga.
 
 ---
 
-*Documento vivo. Cualquier cambio en el modelo de amenazas (p. ej. abrir registro público, multi-tenant o exponer la API) debe actualizar §7 antes de desplegar.*
+*Documento vivo. Toda decisión sobre registro público, compartición de secretos, HA o
+multi-tenant debe actualizar §7 y §8 antes de desplegar.*

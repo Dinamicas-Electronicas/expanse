@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import YAML from 'yaml';
 import {
   generateAllHAConfigs,
   generateHACompose,
@@ -67,16 +68,16 @@ describe('HA generation integration', () => {
     });
 
     expect(result.services.app.image).toBe('my-app:latest');
-    expect(result.services.etcd).toBeDefined();
-    expect(result.services['db-primary'].environment.POSTGRES_PASSWORD).toBe('secret');
-    expect(result.services['db-replica'].deploy.replicas).toBe(2);
+    expect(result.services['db-primary'].environment.POSTGRESQL_PASSWORD).toBe('secret');
+    expect(result.services['db-replica-1']).toBeDefined();
+    expect(result.services['db-replica-2']).toBeDefined();
     expect(result.services.pgbouncer).toBeDefined();
     expect(result.services.haproxy).toBeDefined();
     expect(result.services.backup).toBeDefined();
-    expect(result.networks['expanse-network'].driver).toBe('overlay');
+    expect(Object.values(result.networks).every((network: any) => network?.driver !== 'overlay')).toBe(true);
   });
 
-  it('generates matching Patroni, proxy and backup configuration files', () => {
+  it('generates matching proxy, pool and backup configuration files', () => {
     const configs = generateAllHAConfigs(config, {
       dbName: 'app',
       dbUser: 'postgres',
@@ -84,15 +85,53 @@ describe('HA generation integration', () => {
     });
 
     expect(Object.keys(configs)).toEqual(expect.arrayContaining([
-      'patroni-primary.yml',
-      'patroni-replica.yml',
       'haproxy.cfg',
       'pgbouncer.ini',
       'backup.sh',
     ]));
-    expect(configs['patroni-primary.yml']).toContain('db-primary');
+    expect(configs['pgbouncer.ini']).toContain('host=haproxy');
     expect(configs['pgbouncer.ini']).toContain('pool_mode = transaction');
-    expect(configs['backup.sh']).toContain('--wal-method=fetch');
+    expect(configs['backup.sh']).toContain('pg_dump');
     expect(configs['backup.sh']).toContain('gpg --symmetric');
   });
+
+  it('produces a compose file accepted by the real Compose CLI', async () => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+
+    const execFileAsync = promisify(execFile);
+    const hasDocker = await execFileAsync('docker', ['compose', 'version'])
+      .then(() => true)
+      .catch(() => false);
+    if (!hasDocker) return;
+
+    const compose = generateHACompose({
+      baseCompose: { services: { app: { image: 'my-app:latest' } } },
+      haConfig: config,
+      projectName: 'integration-test',
+      dbCredentials: { dbName: 'app', dbUser: 'postgres', dbPassword: 'secret' },
+    });
+    const configs = generateAllHAConfigs(config, {
+      dbName: 'app',
+      dbUser: 'postgres',
+      dbPassword: 'secret',
+    });
+
+    const directory = await mkdtemp(path.join(tmpdir(), 'expanse-ha-'));
+    try {
+      for (const [name, content] of Object.entries(configs)) {
+        await writeFile(path.join(directory, name), content);
+      }
+      const file = path.join(directory, 'docker-compose.yaml');
+      await writeFile(file, YAML.stringify(compose));
+
+      await expect(execFileAsync('docker', ['compose', '-f', file, 'config', '--quiet']))
+        .resolves.toBeDefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

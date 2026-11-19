@@ -9,8 +9,13 @@ services:
     environment:
       - CORE_ONLY=true
       - DISABLE_TELEMETRY=true
+      - ENABLE_EXTERNAL_TELEMETRY=${ENABLE_EXTERNAL_TELEMETRY:-false}
       - DISABLE_SIGNUP=${DISABLE_SIGNUP:-false}
       - BREVO_DISABLED=${BREVO_DISABLED:-true}
+      - ALLOW_COMPOSE_HOST_ACCESS=${ALLOW_COMPOSE_HOST_ACCESS:-false}
+      - ALLOW_COMPOSE_BUILD=${ALLOW_COMPOSE_BUILD:-false}
+      - ALLOW_HOST_PROJECT_OPS=${ALLOW_HOST_PROJECT_OPS:-false}
+      - TRUST_PROXY=${TRUST_PROXY:-true}
       - URL=${APP_URL:-http://localhost:4000}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set; run pnpm generate-secrets}
       - MONGODB_URI=mongodb://${DB_USER:?DB_USER must be set}:${DB_PASS:?DB_PASS must be set}@db:27017/expanse?authSource=admin

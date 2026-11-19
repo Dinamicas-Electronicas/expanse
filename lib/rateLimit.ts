@@ -46,8 +46,13 @@ export function rateLimit(key: string, limit: number, windowMs: number, now = Da
 /** Best-effort client IP for rate-limit keys (proxy aware). */
 export async function clientKey(scope: string): Promise<string> {
     const h = await headers();
-    const forwarded = h.get('x-forwarded-for') || '';
-    const ip = forwarded.split(',')[0].trim() || h.get('x-real-ip') || 'unknown';
+    // Avoid trusting client-controlled forwarding headers unless the instance
+    // is actually behind a reverse proxy. Set TRUST_PROXY=false when exposing
+    // the app directly to reject spoofed X-Forwarded-For values.
+    const trustProxy = (process.env.TRUST_PROXY || 'true').toLowerCase() !== 'false';
+    const forwarded = trustProxy ? (h.get('x-forwarded-for') || '') : '';
+    const realIp = trustProxy ? (h.get('x-real-ip') || '') : '';
+    const ip = forwarded.split(',')[0].trim() || realIp || 'unknown';
     return `${scope}:${ip}`;
 }
 
@@ -55,3 +60,12 @@ export async function clientKey(scope: string): Promise<string> {
 export function resetRateLimits(): void {
     buckets.clear();
 }
+
+// Purge expired buckets so the in-memory store cannot grow without bound.
+const purgeTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of buckets) {
+        if (bucket.resetAt <= now) buckets.delete(key);
+    }
+}, 60_000);
+if (typeof purgeTimer.unref === 'function') purgeTimer.unref();

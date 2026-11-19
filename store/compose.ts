@@ -18,6 +18,7 @@ import toast from "react-hot-toast";
 import usePositionMap from "@/store/metadataMap";
 import { extractMetadata } from "@/lib/metadata";
 import { sanitizeDockerName } from "@/lib/dockerCompose";
+import { parseImageRef } from "@/lib/imageRef";
 import useDisableStateStore from "@/store/disabled";
 import { TemplateService } from "@/types/library";
 import { useSystemStore } from "@/store/systemStore";
@@ -183,6 +184,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
         resetCompose: () => {
             cancelPendingSave();
             const newCompose = new Compose({ name: generateRandomName() });
+            const previousId = useComposeIdStore.getState().id;
             set({
                 compose: newCompose,
                 tick: get().tick + 1,
@@ -197,11 +199,10 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             usePositionMap.getState().setPositionMap(new Map());
             usePositionMap.getState().setConnectionMap(new Map());
 
-            // Clear HA store for this compose
-            const composeId = useComposeIdStore.getState().id;
-            if (composeId) {
-                useHAStore.getState().clearHAConfig(composeId);
-                useHAStore.getState().stopPolling(composeId);
+            // Clear HA store for the project we just left.
+            if (previousId) {
+                useHAStore.getState().clearHAConfig(previousId);
+                useHAStore.getState().stopPolling(previousId);
             }
 
             // Clean URL
@@ -248,7 +249,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             }
 
             const createService = (tmp: TemplateService, isRelated = false): Service => {
-                const [imageName, imageTag] = tmp.image.split(':');
+                const imageRef = parseImageRef(tmp.image);
                 const newEnvironment = new SuperSet<Readonly<Env>>();
                 const newPorts: PortMapping[] = [];
                 const newBindings = new SuperSet<Binding>();
@@ -291,7 +292,7 @@ export const useComposeStore = create<ComposeState>((set, get) => {
 
                 return new Service({
                     name: finalName,
-                    image: new Image({ name: imageName, tag: imageTag }),
+                    image: new Image({ name: imageRef.name, tag: imageRef.tag }),
                     environment: newEnvironment.size > 0 ? newEnvironment : undefined,
                     ports: newPorts.length > 0 ? newPorts : undefined,
                     bindings: newBindings.size > 0 ? newBindings : undefined,
@@ -402,9 +403,9 @@ export const useComposeStore = create<ComposeState>((set, get) => {
             const { setCompose } = useComposeStore.getState();
             const stackSuffix = generateRandomName().substring(0, 4);
 
-            const [imgName, imgTag] = imageName.includes(':')
-                ? imageName.split(':')
-                : [imageName, 'latest'];
+            const imageRef = parseImageRef(imageName);
+            const imgName = imageRef.name;
+            const imgTag = imageRef.tag;
 
             const baseName = imgName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
             const finalName = baseName.length < 8 ? baseName : baseName + "_" + stackSuffix;

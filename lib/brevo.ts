@@ -56,6 +56,9 @@ export async function registerUserToBrevo(data: RegisterType): Promise<string | 
 }
 
 export async function updateUserList(email: string, listsToAdd: number[] = [], listsToRemove: number[] = []) {
+    if ((process.env.BREVO_DISABLED || "").toLowerCase() === "true") {
+        return;
+    }
     try {
         const resp = await axios.put(`https://api.brevo.com/v3/contacts/${email}`,
             {

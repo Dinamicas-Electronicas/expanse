@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => {
         findOne: vi.fn(async () => state.user),
         insertOne: vi.fn(async (_doc: Record<string, any>) => ({ insertedId: { toString: () => '6aff14b3f3ec933fa297d865' } })),
         countDocuments: vi.fn(async () => 1),
+        findOneAndUpdate: vi.fn(async () => null),
+        updateOne: vi.fn(async () => ({ upsertedCount: 1 })),
         createSessionToken: vi.fn(async () => 'signed-token'),
         setSessionCookie: vi.fn(async () => undefined),
     };
@@ -27,8 +29,16 @@ vi.mock('@/lib/mongodb', () => ({
             findOne: mocks.findOne,
             insertOne: mocks.insertOne,
             countDocuments: mocks.countDocuments,
+            findOneAndUpdate: mocks.findOneAndUpdate,
+            updateOne: mocks.updateOne,
         }),
     })),
+}));
+
+vi.mock('@/lib/rateLimit', () => ({
+    rateLimit: vi.fn(() => ({ ok: true, remaining: 10, retryAfterSeconds: 0 })),
+    clientKey: vi.fn(async () => 'test-client'),
+    resetRateLimits: vi.fn(),
 }));
 
 vi.mock('@/lib/session', () => ({
@@ -46,7 +56,7 @@ vi.mock('@/app/actions/exportActions', () => ({
     processAndSaveClientExport: vi.fn(async () => Buffer.from('')),
 }));
 
-import { createOrLoginUser } from '@/actions/userActions';
+import { createOrLoginUser, registerUser } from '@/actions/userActions';
 
 describe('createOrLoginUser (password authentication only)', () => {
     beforeEach(() => {
@@ -94,23 +104,41 @@ describe('createOrLoginUser (password authentication only)', () => {
         expect(mocks.setSessionCookie).toHaveBeenCalledWith('signed-token');
     });
 
-    it('creates new accounts without persisting the external flag', async () => {
+    it('does not create accounts from the login helper', async () => {
         await expect(
-            createOrLoginUser('new@example.com', { password: 'a-strong-password', external: 'github' }),
-        ).resolves.toBe('6aff14b3f3ec933fa297d865');
-
-        const inserted = mocks.insertOne.mock.calls[0][0];
-        expect(inserted.email).toBe('new@example.com');
-        expect(inserted.external).toBeUndefined();
-        expect(inserted.password).not.toBe('a-strong-password');
-        expect(await bcrypt.compare('a-strong-password', inserted.password)).toBe(true);
-        expect(inserted.role).toBe('user');
+            createOrLoginUser('new@example.com', { password: 'a-strong-password' }),
+        ).rejects.toThrow('Invalid email or password');
+        expect(mocks.insertOne).not.toHaveBeenCalled();
+        expect(mocks.setSessionCookie).not.toHaveBeenCalled();
     });
 
     it('requires a password for new accounts', async () => {
         await expect(createOrLoginUser('new@example.com', { external: 'github' }))
             .rejects.toThrow('Invalid email or password');
         expect(mocks.insertOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects registration when signup is disabled', async () => {
+        process.env.DISABLE_SIGNUP = 'true';
+        try {
+            const result = await registerUser('new@example.com', 'a-strong-password', '', true, '{}');
+            expect(result.ok).toBe(false);
+            expect(mocks.insertOne).not.toHaveBeenCalled();
+        } finally {
+            delete process.env.DISABLE_SIGNUP;
+        }
+    });
+
+    it('creates accounts only through the validated registration path', async () => {
+        const result = await registerUser('new@example.com', 'a-strong-password', 'Acme', true, '{}');
+        expect(result.ok).toBe(true);
+        const inserted = mocks.insertOne.mock.calls[0][0];
+        expect(inserted.email).toBe('new@example.com');
+        expect(inserted.termsAccepted).toBe(true);
+        expect(await bcrypt.compare('a-strong-password', inserted.password)).toBe(true);
+        // updateOne reported an upsert => this was the first account.
+        expect(inserted.role).toBe('admin');
+        expect(mocks.setSessionCookie).toHaveBeenCalledWith('signed-token');
     });
 
     it('rejects invalid emails through schema validation', async () => {

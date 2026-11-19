@@ -420,8 +420,10 @@ export async function getHAStatus(composeId: string): Promise<HAStatusResponse |
             // Compose might not be deployed
         }
 
-        // Parse container statuses
-        const containerMap = new Map(containers.map(c => [c.Name || c.Service, c]));
+        // Parse container statuses. `docker compose ps` exposes the service
+        // name in `Service`; `Name` is prefixed with the project name and never
+        // matches (expanse-project_x-db-primary-1).
+        const containerMap = new Map(containers.map(c => [c.Service || c.Name, c]));
 
         // Build primary info
         const primaryContainer = containerMap.get('db-primary') || containerMap.get('postgres-primary');
@@ -551,11 +553,12 @@ export async function simulateFailover(
         const toNode = targetReplica || 'db-replica-1';
         const startTime = Date.now();
 
-        // Use patronictl to trigger failover
+        // Use Patroni when available; the default topology promotes the
+        // Bitnami replica with pg_ctl.
         const target = assertDockerReference(toNode, 'replica name');
         try {
             const { stdout, stderr } = await runCompose(
-                ['exec', '-T', 'db-primary', 'patronictl', '-c', '/etc/patroni/patroni.yml', 'failover', '--force', target],
+                ['exec', '-T', target, 'pg_ctl', 'promote', '-D', '/bitnami/postgresql/data'],
                 { project: composeProjectName(id), yamlPath },
             );
             const duration = Date.now() - startTime;
@@ -736,7 +739,7 @@ export async function restoreBackup(composeId: string, backupId: string): Promis
         const startTime = Date.now();
         try {
             await runCompose(
-                ['exec', '-T', 'db-primary', 'sh', '-c', `psql -U postgres -d expanse < /backups/${fileName}`],
+                ['exec', '-T', 'db-primary', 'sh', '-c', `psql -U "$POSTGRESQL_USERNAME" -d "$POSTGRESQL_DATABASE" < "/backups/${fileName}"`],
                 { project: composeProjectName(id), yamlPath },
             );
             const duration = Date.now() - startTime;
@@ -792,20 +795,21 @@ export async function getPoolMetrics(composeId: string): Promise<PoolMetrics | {
 
         // Parse PgBouncer SHOW STATS output
         // This would need proper parsing based on actual output format
+        const poolConfig = (owned.haConfig as DatabaseHAConfig | undefined)?.connectionPool;
         return {
             totalConnections: 0,
             activeConnections: 0,
             idleConnections: 0,
             waitingConnections: 0,
-            maxConnections: 1000,
-            poolSize: 25,
+            maxConnections: poolConfig?.maxConnections ?? 0,
+            poolSize: poolConfig?.poolSize ?? 0,
             minPoolSize: 5,
             reservePoolSize: 5,
             avgQueryTime: 0,
             queriesPerSecond: 0,
             cacheHitRatio: 0,
-            serverLifetime: 3600,
-            serverIdleTimeout: 600,
+            serverLifetime: poolConfig?.idleTimeout ?? 0,
+            serverIdleTimeout: poolConfig?.idleTimeout ?? 0,
             lastUpdated: new Date()
         };
     } catch (error: any) {

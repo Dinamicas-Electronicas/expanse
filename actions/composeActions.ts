@@ -41,7 +41,7 @@ export async function shareCompose(composeId: string) {
         userId,
     });
 
-    revalidatePath("/dashboard/shares");
+    revalidatePath("/dashboard/deploys");
 
     if (existingShare) {
         return `${SITE_URL}/share?id=${existingShare._id.toString()}`;
@@ -143,7 +143,7 @@ export const deleteShareById = async (shareId: string) => {
             userId: new ObjectId(payload.userId as string)
         });
 
-        revalidatePath("/dashboard/shares");
+        revalidatePath("/dashboard/deploys");
         return result;
     } catch (error) {
         console.error(error);

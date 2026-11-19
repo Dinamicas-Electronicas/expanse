@@ -205,9 +205,46 @@ export function isDbImage(image: string): string | null {
     return null;
 }
 
-export function patchComposeYaml(yamlText: string, metadata?: composeMetadata): string {
+export function stampComposeOwnership(doc: any, owner: string, composeId: string): void {
+    if (!doc?.services || typeof doc.services !== 'object') return;
+
+    for (const service of Object.values<any>(doc.services)) {
+        if (!service || typeof service !== 'object') continue;
+
+        const labels = service.labels;
+        if (Array.isArray(labels)) {
+            const entries = labels.filter((label: unknown) => typeof label === 'string') as string[];
+            service.labels = [
+                ...entries.filter((label) => !label.startsWith('com.expanse.')),
+                `com.expanse.owner=${owner}`,
+                `com.expanse.compose=${composeId}`,
+            ];
+        } else if (labels && typeof labels === 'object') {
+            service.labels = {
+                ...labels,
+                'com.expanse.owner': owner,
+                'com.expanse.compose': composeId,
+            };
+        } else {
+            service.labels = {
+                'com.expanse.owner': owner,
+                'com.expanse.compose': composeId,
+            };
+        }
+    }
+}
+
+export function patchComposeYaml(
+    yamlText: string,
+    metadata?: composeMetadata,
+    ownership?: { owner: string; composeId: string },
+): string {
     const doc = YAML.parse(yamlText);
     if (!doc?.services) return yamlText;
+
+    if (ownership) {
+        stampComposeOwnership(doc, ownership.owner, ownership.composeId);
+    }
 
     // Compose refuses to run when any key is not `[a-zA-Z0-9._-]+`
     // (e.g. a stack called "WordPress (Fullstack)" produced

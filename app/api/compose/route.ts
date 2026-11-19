@@ -10,8 +10,8 @@ import { NextResponse } from "next/server";
 import { getComposeByShareId } from "@/actions/composeActions";
 import { Translator } from "expanse-docker-lib";
 import YAML from "yaml";
-import { jwtVerify } from "jose";
-import { registerComposeWithoutMetadata } from "@/actions/userActions";
+import { verifySessionToken } from "@/lib/auth";
+import { registerComposeWithoutMetadata } from "@/lib/composeStore";
 import { ObjectId } from "bson";
 
 export async function GET(req: Request) {
@@ -48,15 +48,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
     const token = req.headers.get("Authorization")
     if(token){
-        const secretKey = process.env.SECRET_KEY;
-        if (!secretKey) {
-            console.error("SECRET_KEY is not configured");
-            return NextResponse.json({error: "Server configuration error"}, {status: 500})
-        }
-
-        const encodedSecretKey = new TextEncoder().encode(secretKey);
         try{
-            const {payload} = await jwtVerify(token || "", encodedSecretKey);
+            const payload = await verifySessionToken(token);
             const body = await req.json();
             const compose = Translator.fromDict(body)
             const t = new Translator(compose)

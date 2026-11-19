@@ -7,6 +7,7 @@
  */
 
 import { getDb } from './mongodb';
+import { ensureAdminExists } from './users';
 
 let indexesReady: Promise<void> | null = null;
 
@@ -41,6 +42,11 @@ export function ensureIndexes(): Promise<void> {
             if (result.status === 'rejected') {
                 console.error(`[db] Could not create index ${tasks[index][0]}:`, result.reason?.message ?? result.reason);
             }
+        });
+
+        // Legacy installations created before roles existed need one admin.
+        await ensureAdminExists().catch((error) => {
+            console.error('[db] Admin bootstrap failed:', error);
         });
     })().catch((error) => {
         console.error('[db] Index bootstrap failed:', error);

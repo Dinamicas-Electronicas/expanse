@@ -12,7 +12,7 @@ import React, { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Code, FileUp, Zap, Image, Square, Play, FileDown, CheckCircle2, Loader2, ChevronLeft, Plus } from "lucide-react";
 import Playground, { PlaygroundHandle } from "@/components/playground/playground";
-import { useComposeStore, save } from "@/store/compose";
+import { useComposeStore } from "@/store/compose";
 
 import { useExecutionStore } from "@/store/execution";
 import useComposeIdStore from "@/store/composeId";
@@ -130,12 +130,9 @@ export default function PlaygroundContent() {
         }
     }, [isExecuting]);
 
-    const handleNew = async () => {
-        if (isDirty) {
-            const confirmDiscard = window.confirm("You have unsaved changes. Do you want to save them before creating a new project?");
-            if (confirmDiscard) {
-                await save(compose);
-            }
+    const handleNew = () => {
+        if (isDirty && !window.confirm("Discard unsaved changes and create a new project?")) {
+            return;
         }
         resetCompose();
         toast.success("New project started");
@@ -184,6 +181,14 @@ export default function PlaygroundContent() {
                         }
                         replaceCompose(newCompose, { disableSave: true });
                         useComposeIdStore.getState().setId(idParam);
+
+                        // Restore the persisted HA choice so the next deploy does
+                        // not silently disable it after a reload.
+                        const savedHa = loadedCompose.haEnabled && loadedCompose.haConfig
+                            ? loadedCompose.haConfig
+                            : null;
+                        useComposeStore.getState().setHAConfig(savedHa);
+                        useComposeStore.getState().setHAEnabled(!!savedHa);
 
                         // Wait for nodes to be rendered and layed out if there was no metadata
                         if (!loadedCompose.metadata) {

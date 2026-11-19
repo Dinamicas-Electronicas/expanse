@@ -27,6 +27,9 @@ import { useState } from "react";
 import { shareCompose } from "@/actions/composeActions";
 
 async function handleDelete(composeId: string) {
+    if (!window.confirm("Delete this project? The deployment (if running) will keep running and its files cannot be recovered.")) {
+        return;
+    }
     try {
         await deleteCompose(composeId)
         toast.success("Deleted")
@@ -63,6 +66,9 @@ export default function ComposeRow(data: ComposeLine) {
 
     async function handleRemoveDeploy() {
         if (!data.projectName) return
+        if (!window.confirm("Remove this deployment? Containers and ALL persistent volumes will be deleted.")) {
+            return
+        }
         toast.promise(removeProjectByName(data.projectName), {
             loading: 'Removing deployment...',
             success: 'Deployment removed',

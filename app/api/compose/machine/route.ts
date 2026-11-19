@@ -6,11 +6,12 @@
  * Consulta el archivo LICENSE en la raíz del proyecto.
  */
 
-import {NextResponse} from "next/server";
-import {Compose, Network, Service, Translator, Image, Binding, Volume} from "expanse-docker-lib";
-import {jwtVerify} from "jose";
-import {registerComposeWithoutMetadata} from "@/actions/userActions";
-import {ObjectId} from "bson";
+import { NextResponse } from "next/server";
+import { Compose, Network, Service, Translator, Image, Binding, Volume } from "expanse-docker-lib";
+import { verifySessionToken } from "@/lib/auth";
+import { registerComposeWithoutMetadata } from "@/lib/composeStore";
+import { ObjectId } from "bson";
+import { parseImageRef } from "@/lib/imageRef";
 
 function getFormattedDate() {
     const now = new Date();
@@ -26,44 +27,43 @@ function getFormattedDate() {
 export async function POST(req: Request) {
     const token = req.headers.get("Authorization")
     if(token){
-        const secretKey = process.env.SECRET_KEY;
-        if (!secretKey) {
-            console.error("SECRET_KEY is not configured");
-            return NextResponse.json({error: "Server configuration error"}, {status: 500})
-        }
-
-        const encodedSecretKey = new TextEncoder().encode(secretKey);
         try{
-            const {payload} = await jwtVerify(token || "", encodedSecretKey);
-            const body = await req.json();
+            const payload = await verifySessionToken(token);
+            const body = await req.json().catch(() => ({}));
+            const containers = body?.containers && typeof body.containers === 'object' ? body.containers : {};
+            const networks = body?.networks && typeof body.networks === 'object' ? body.networks : {};
+            const volumes = body?.volumes && typeof body.volumes === 'object' ? body.volumes : {};
             const compose = new Compose()
-            Object.keys(body?.containers || {}).forEach(key=>{
+            Object.keys(containers).forEach(key => {
+                const imageRef = parseImageRef(String(containers[key]?.image ?? ''));
                 compose.addService(new Service({
                     name: key,
                     image: new Image({
-                        name: <string>body?.containers[key]?.image.split(":")[0],
-                        tag: <string>body?.containers[key]?.image.split(":")[1]
+                        name: imageRef.name,
+                        tag: imageRef.tag,
                     })
                 }))
             })
-            Object.keys(body?.networks || {}).forEach(networkName=>{
-                const concernedServicesNames = Object.keys(body?.containers || {}).filter(
-                    containerKey=> (body?.containers[containerKey]?.networks as string[]).includes(networkName)
+            Object.keys(networks).forEach(networkName => {
+                const concernedServicesNames = Object.keys(containers).filter(
+                    containerKey => Array.isArray(containers[containerKey]?.networks)
+                        && containers[containerKey].networks.includes(networkName)
                 )
-                const concernedServices= Array.from(compose.services).filter(c=>concernedServicesNames.includes(c?.name))
-                compose.addNetwork(new Network({name: networkName}),concernedServices)
+                const concernedServices = Array.from(compose.services).filter(c => concernedServicesNames.includes(c?.name))
+                compose.addNetwork(new Network({name: networkName}), concernedServices)
             })
-            Object.keys(body?.volumes)?.forEach(volumeName=>{
-                const concernedServicesNames = Object.keys(body?.containers || {}).filter(
-                    containerKey=> (body?.containers[containerKey]?.volumes as string[]).includes(volumeName)
+            Object.keys(volumes).forEach(volumeName => {
+                const concernedServicesNames = Object.keys(containers).filter(
+                    containerKey => Array.isArray(containers[containerKey]?.volumes)
+                        && containers[containerKey].volumes.includes(volumeName)
                 )
-                const concernedServices= Array.from(compose.services).filter(c=>concernedServicesNames.includes(c?.name))
+                const concernedServices = Array.from(compose.services).filter(c => concernedServicesNames.includes(c?.name))
                 compose.addBinding(new Binding({
-                    source: body?.volumes[volumeName]?.type === "bind" ?
-                        body?.volumes[volumeName]?.source as string:
+                    source: volumes[volumeName]?.type === "bind" ?
+                        volumes[volumeName]?.source as string :
                         new Volume({name: volumeName}),
                     target: ""
-                }),concernedServices)
+                }), concernedServices)
             })
             compose.name = `cli-${getFormattedDate()}`
             const t = new Translator(compose)

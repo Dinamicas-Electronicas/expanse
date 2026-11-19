@@ -8,7 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
-import { getGithubAccesToken } from "@/actions/github";
+import { exchangeGithubCode } from "@/lib/github";
 import axios from "axios";
 import { loginOrRegisterOAuthUser } from "@/lib/oauth";
 import { registerUserToBrevo } from "@/lib/brevo";
@@ -27,7 +27,7 @@ export async function GET(req: Request) {
     }
     await CSRF_collection.deleteOne({ token: state })
     try {
-        const ghToken = await getGithubAccesToken(code)
+        const ghToken = await exchangeGithubCode(code)
         const resp = await axios.get('https://api.github.com/user', {
             headers: {
                 Authorization: `Bearer ${ghToken}`

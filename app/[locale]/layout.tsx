@@ -48,7 +48,7 @@ export default async function LocaleLayout({
     return (
         <html lang={locale} className={dm_sans.className}>
             <head>
-                {!process.env.DISABLE_TELEMETRY &&
+                {process.env.ENABLE_EXTERNAL_TELEMETRY === 'true' &&
                     <Script
                         src="https://opentech-ux.org/lom-captor/dist/opentech-ux-lib.js"
                         strategy="beforeInteractive"

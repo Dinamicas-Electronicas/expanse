@@ -14,15 +14,17 @@ import { zfd } from "zod-form-data";
 import bcrypt from "bcryptjs";
 import { registerUserToBrevo, sendRecoverPassdEmail, updateUserList } from "@/lib/brevo";
 import { cookies } from 'next/headers'
-import { redirect } from "next/navigation";
 import { ObjectId } from "bson";
 import { composeMetadata } from "@/lib/metadata";
 import { processAndSaveClientExport } from "@/app/actions/exportActions";
 import { revalidatePath } from "next/cache";
 import { ensureAuth } from "@/lib/auth";
-import { generateRandomString, isWithinOneDay } from "@/lib/utils";
+import { isWithinOneDay } from "@/lib/utils";
+import { randomBytes } from "crypto";
 import { createSessionToken, setSessionCookie } from "@/lib/session";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
+import { createUserRecord } from "@/lib/users";
+import { isValidObjectId } from "@/lib/validation";
 import {
     emailSchema,
     loginCredentialsSchema,
@@ -30,9 +32,15 @@ import {
     zodErrorMessage,
 } from "@/lib/validation";
 
+/**
+ * Password login only.
+ *
+ * This used to create accounts as a side effect, which turned it into a public
+ * signup endpoint that bypassed `DISABLE_SIGNUP`, terms acceptance and the
+ * registration rate limit. New accounts are created only by `registerUser`
+ * (password) or `loginOrRegisterOAuthUser` (verified OAuth identity).
+ */
 export async function createOrLoginUser(email: string, data: any): Promise<string> {
-    // Never trust the client: only password-based authentication is accepted
-    // here. OAuth logins go through lib/oauth.ts, which is not a server action.
     const parsedEmail = emailSchema.parse(email);
     const password = typeof data?.password === 'string' ? data.password : '';
 
@@ -40,46 +48,32 @@ export async function createOrLoginUser(email: string, data: any): Promise<strin
         throw new Error("Invalid email or password");
     }
 
+    const limit = rateLimit(`${await clientKey('login')}:${parsedEmail}`, 10, 10 * 60 * 1000);
+    if (!limit.ok) {
+        throw new Error(`Too many login attempts. Try again in ${Math.ceil(limit.retryAfterSeconds / 60)} minutes.`);
+    }
+
     const db = await getDb();
     const collection = db.collection("users");
     const userExist = await collection.findOne({ email: parsedEmail });
 
-    if (userExist) {
-        if (!userExist.password) {
-            throw new Error("Invalid email or password");
-        }
-        const passwordMatch = await bcrypt.compare(password, userExist.password);
-        if (!passwordMatch) {
-            throw new Error("Invalid email or password");
-        }
-
-        await setSessionCookie(await createSessionToken(userExist._id.toString(), userExist.email));
-        return userExist._id.toString();
+    if (!userExist?.password) {
+        throw new Error("Invalid email or password");
     }
 
-    // New user: hash the password and never store client-provided auth flags
-    const safeData: Record<string, any> = { ...(data ?? {}) };
-    delete safeData.external;
-    safeData.password = await bcrypt.hash(password, 10);
-
-    // Check if this is the first user (becomes admin)
-    const userCount = await collection.countDocuments();
-    const isFirstUser = userCount === 0;
-
-    const result = await collection.insertOne({
-        email: parsedEmail,
-        ...safeData,
-        role: isFirstUser ? 'admin' : 'user',
-        createdAt: new Date().getTime()
-    });
-
-    if (!result.insertedId) {
-        throw new Error("Could not create the account");
+    const passwordMatch = await bcrypt.compare(password, userExist.password);
+    if (!passwordMatch) {
+        throw new Error("Invalid email or password");
     }
 
-    await setSessionCookie(await createSessionToken(result.insertedId.toString(), parsedEmail));
-    return result.insertedId.toString();
+    await setSessionCookie(await createSessionToken(
+        userExist._id.toString(),
+        userExist.email,
+        Number(userExist.sessionVersion ?? 0),
+    ));
+    return userExist._id.toString();
 }
+
 
 export type RegisterResult = { ok: true; data: string } | { ok: false; error: string };
 
@@ -113,16 +107,30 @@ export async function registerUser(email: string, password: string, company: str
     const input = validation.data;
 
     try {
-        const brevoId = await registerUserToBrevo({ email: input.email })
-        await createOrLoginUser(input.email, {
+        let parsedData: Record<string, unknown>;
+        try {
+            parsedData = JSON.parse(input.data);
+        } catch {
+            return { ok: false, error: 'Invalid project data' };
+        }
+
+        const passwordHash = await bcrypt.hash(input.password, 12);
+        const { id } = await createUserRecord({
             email: input.email,
-            password: input.password,
-            companyType: input.company,
-            termsAccepted: true,
-            brevoId,
+            passwordHash,
+            fields: {
+                companyType: input.company,
+                termsAccepted: true,
+            },
         });
 
-        const parsedData = JSON.parse(input.data)
+        const brevoId = await registerUserToBrevo({ email: input.email });
+        if (brevoId) {
+            await (await getDb()).collection("users").updateOne({ _id: new ObjectId(id) }, { $set: { brevoId } });
+        }
+
+        await setSessionCookie(await createSessionToken(id, input.email, 0));
+
         if (Object.keys(parsedData)?.length === 0) {
             return { ok: true, data: "" };
         }
@@ -139,6 +147,9 @@ export const registerCompose = async (compose: object, metadata: composeMetadata
     const collection = db.collection("composes");
     let result = "";
     if (id) {
+        if (!isValidObjectId(id)) {
+            throw new Error("Invalid compose id");
+        }
         const objectId = new ObjectId(id);
         const updateResult = await collection.updateOne(
             { _id: objectId, userId: userId }, // scope to owner
@@ -182,21 +193,6 @@ export const registerCompose = async (compose: object, metadata: composeMetadata
     throw Error("could not register");
 };
 
-export const registerComposeWithoutMetadata = async (compose: object, userId: ObjectId) => {
-    const db = await getDb();
-    const collection = db.collection("composes");
-    const r = await collection.insertOne({
-        userId: userId,
-        data: compose,
-        metadata: null,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    });
-    const result = r.insertedId.toString();
-    if (result) return result;
-    throw Error("could not register");
-};
-
 export const getAllMyComposeOrderByEditDate = async () => {
     if (process.env.npm_lifecycle_event === 'build') {
         return [];
@@ -227,7 +223,7 @@ export const getAllMyComposeOrderByEditDate = async () => {
 
 export async function loginUser(prevState: any, formData: FormData) {
     const loginSchema = zfd.formData({
-        email: z.string().email(),
+        email: emailSchema,
         password: z.string().min(1).max(200),
         data: z.string().optional()
     });
@@ -253,7 +249,11 @@ export async function loginUser(prevState: any, formData: FormData) {
         const passwordMatch = await bcrypt.compare(password, user.password);
         if (!passwordMatch) throw new Error("Invalid email or password");
 
-        await setSessionCookie(await createSessionToken(user._id.toString(), user.email));
+        await setSessionCookie(await createSessionToken(
+            user._id.toString(),
+            user.email,
+            Number(user.sessionVersion ?? 0),
+        ));
 
         if (data) {
             const parsedData = JSON.parse(data);
@@ -287,10 +287,11 @@ export async function getApiToken(email: string, password: string): Promise<stri
     const passwordMatch = await bcrypt.compare(credentials.password, user.password);
     if (!passwordMatch) throw new Error("Invalid email or password");
 
-    return createSessionToken(user._id.toString(), user.email);
+    return createSessionToken(user._id.toString(), user.email, Number(user.sessionVersion ?? 0));
 }
 
 export const getComposeById = async (composeId: string) => {
+    if (!isValidObjectId(composeId)) return undefined;
     const payload = await ensureAuth();
     const db = await getDb();
     const collection = db.collection("composes");
@@ -308,6 +309,8 @@ export const getComposeById = async (composeId: string) => {
             id: compose._id.toString(),
             data: compose.data,
             metadata: compose?.metadata,
+            haConfig: compose?.haConfig,
+            haEnabled: compose?.haEnabled === true,
             createdAt: compose.createdAt,
             updatedAt: compose.updatedAt
         };
@@ -325,6 +328,7 @@ export const getComposeById = async (composeId: string) => {
  * reachable without authentication. It now requires a session and ownership.
  */
 export const getComposeByIdPublic = async (composeId: string) => {
+    if (!isValidObjectId(composeId)) return undefined;
     const payload = await ensureAuth();
     const db = await getDb();
     const collection = db.collection("composes");
@@ -338,6 +342,8 @@ export const getComposeByIdPublic = async (composeId: string) => {
             id: compose._id.toString(),
             data: compose.data,
             metadata: compose?.metadata,
+            haConfig: compose?.haConfig,
+            haEnabled: compose?.haEnabled === true,
             createdAt: compose.createdAt,
             updatedAt: compose.updatedAt
         };
@@ -366,31 +372,41 @@ export const getMyInfos = async () => {
     }
 };
 
-export const deleteUser = async () => {
+export const deleteUser = async (password?: string) => {
     const payload = await ensureAuth();
     const db = await getDb();
     const userId = new ObjectId(payload.userId as string);
+    const userCollection = db.collection("users");
 
     try {
-        const userCollection = db.collection("users");
-        const composeCollection = db.collection("composes");
+        const user = await userCollection.findOne({ _id: userId }, { projection: { email: 1, password: 1 } });
+        if (!user) throw new Error("Account not found");
 
-        // Anonymize user's composes
-        await composeCollection.updateMany({ userId: userId }, { $set: { userId: null } });
+        // Re-authenticate on the server: the confirmation dialog is not a
+        // security boundary. Passwordless (OAuth) accounts are exempt because
+        // there is no password to verify.
+        if (user.password) {
+            if (!password || !(await bcrypt.compare(password, user.password))) {
+                throw new Error("Invalid password");
+            }
+        }
 
-        const user = await userCollection.findOne({ _id: userId }, { projection: { email: 1 } });
-        if (user?.email) {
+        // Cascade: projects, shares and reset codes must not survive the account.
+        await db.collection("composes").deleteMany({ userId });
+        await db.collection("shares").deleteMany({ userId });
+        await db.collection("reset_code").deleteMany({ userId });
+
+        if (user.email) {
             await updateUserList(user.email, [], [9]);
         }
 
         await userCollection.deleteOne({ _id: userId });
         (await cookies()).delete("token");
-        console.log("account " + userId.toString() + " deleted");
     } catch (error) {
         console.error("Error deleting user:", error);
         throw new Error("Failed to delete account");
     }
-    redirect("https://form.expanse.com/s/cm40i9zod000hwl0z6005uvwp");
+    return { success: true };
 }
 
 export const logout = async () => {
@@ -400,13 +416,21 @@ export const logout = async () => {
 
 export const deleteCompose = async (composeId: string) => {
     const payload = await ensureAuth();
+    if (!isValidObjectId(composeId)) {
+        throw new Error("Invalid compose id");
+    }
     const db = await getDb();
-    const composeCollection = db.collection("composes");
+    const userId = new ObjectId(payload.userId as string);
+    const id = new ObjectId(composeId);
 
-    await composeCollection.deleteOne({
-        _id: new ObjectId(composeId),
-        userId: new ObjectId(payload.userId as string)
-    });
+    // Remove the project and every share that points to it; otherwise the
+    // public link survives and renders an empty canvas.
+    const result = await db.collection("composes").deleteOne({ _id: id, userId });
+    await db.collection("shares").deleteMany({ composeId: id, userId });
+
+    if (result.deletedCount === 0) {
+        throw new Error("Compose not found");
+    }
 
     revalidatePath("/dashboard", "page");
     return true;
@@ -429,7 +453,7 @@ export async function verifyUserPassword(password: string): Promise<boolean> {
 
 export async function askPasswordReset(prevState: any, formData: FormData) {
     const passwordAskSchema = zfd.formData({
-        email: z.string().email(),
+        email: emailSchema,
     });
 
     try {
@@ -443,14 +467,14 @@ export async function askPasswordReset(prevState: any, formData: FormData) {
 
         const db = await getDb();
         const collection = db.collection("users");
-        const user = await collection.findOne({ email: email });
+        const user = await collection.findOne({ email });
 
         // Return success even if user not found to prevent email enumeration
         if (!user) {
             return { success: true };
         }
 
-        const code = generateRandomString();
+        const code = randomBytes(32).toString('base64url');
         const code_collec = db.collection("reset_code");
         const inserted = await code_collec.insertOne({
             code: code,
@@ -504,8 +528,11 @@ export async function passwordReset(prevState: any, formData: FormData) {
 
         await code_collec.deleteOne({ code: code });
         const user_collec = db.collection("users");
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await user_collec.updateOne({ _id: resetCode.userId }, { $set: { password: hashedPassword } });
+        const hashedPassword = await bcrypt.hash(password, 12);
+        await user_collec.updateOne(
+            { _id: resetCode.userId },
+            { $set: { password: hashedPassword }, $inc: { sessionVersion: 1 } }
+        );
 
         return { success: true };
 

@@ -43,13 +43,13 @@ export function buildSessionCookie(token: string, now = Date.now()): SessionCook
     };
 }
 
-export async function createSessionToken(userId: string, email: string): Promise<string> {
+export async function createSessionToken(userId: string, email: string, sessionVersion = 0): Promise<string> {
     const secretKey = process.env.SECRET_KEY;
     if (!secretKey) {
         throw new Error('Server configuration error: SECRET_KEY is not set.');
     }
 
-    return new SignJWT({ userId, email })
+    return new SignJWT({ userId, email, v: Number(sessionVersion) || 0 })
         .setProtectedHeader({ alg: 'HS256' })
         .setExpirationTime(SESSION_DURATION_STR)
         .sign(new TextEncoder().encode(secretKey));

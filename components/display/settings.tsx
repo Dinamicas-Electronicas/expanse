@@ -37,6 +37,7 @@ export default function Settings({ init }: { init?: settingsInitData }) {
 
     const [email,] = useState(init?.email)
     const [confirm, setConfirm] = useState("")
+    const [deletePassword, setDeletePassword] = useState("")
     const [isExporting, setIsExporting] = useState(false)
     const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
 
@@ -60,12 +61,10 @@ export default function Settings({ init }: { init?: settingsInitData }) {
         fetchSystem();
     }, []);
 
-    async function handleDelete() {
+    async function handleDelete(password: string) {
         try {
-            const res = await deleteUser()
-            if (res) {
-                window.location.href = "https://form.expanse.com/s/cm40i9zod000hwl0z6005uvwp"
-            }
+            await deleteUser(password)
+            window.location.href = "/"
         } catch (e) {
             toast.error(t('errorDeletingAccount'))
             console.error(e)
@@ -329,6 +328,14 @@ export default function Settings({ init }: { init?: settingsInitData }) {
                                             value={confirm}
                                             onChange={e => setConfirm(e.target.value)}
                                         />
+                                        <p className="text-xs text-slate-500 mt-3 mb-2">Your account password (leave empty for OAuth-only accounts):</p>
+                                        <Input
+                                            type="password"
+                                            className="bg-white/5 border-white/10 text-white placeholder:text-slate-700 focus:ring-rose-500/50"
+                                            placeholder="password..."
+                                            value={deletePassword}
+                                            onChange={e => setDeletePassword(e.target.value)}
+                                        />
                                     </div>
                                 </div>
                                 <DialogFooter className="gap-2">
@@ -339,7 +346,7 @@ export default function Settings({ init }: { init?: settingsInitData }) {
                                     </DialogClose>
                                     <Button
                                         type="submit"
-                                        onClick={() => (handleDelete())}
+                                        onClick={() => (handleDelete(deletePassword))}
                                         disabled={confirm !== "delete my account and loose my data"}
                                         className="bg-rose-600 hover:bg-rose-700 transition-all font-bold px-6 shadow-lg shadow-rose-500/20"
                                     >

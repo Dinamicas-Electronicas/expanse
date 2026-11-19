@@ -64,9 +64,8 @@ export function isWithinOneDay(timestamp1: number, timestamp2: number): boolean 
 }
 
 export async function GetLastVersion(): Promise<string> {
-  console.log("fetching")
   const res = await axios.get(
-    "https://api.github.com/repos/lordpietre/expanse/releases/latest",
+    "https://api.github.com/repos/Dinamicas-Electronicas/expanse/releases/latest",
   );
   const data = res.data
   return data?.tag_name
@@ -87,7 +86,7 @@ export const getCachedLastVersion = async (): Promise<string | undefined> => {
   try {
     // Atom feed needs no auth and is not subject to API rate limits.
     const res = await axios.get(
-      "https://github.com/lordpietre/expanse/releases.atom",
+      "https://github.com/Dinamicas-Electronicas/expanse/releases.atom",
     );
     const match = /<entry>[\s\S]*?<title>(.*?)<\/title>/.exec(res.data);
     const title = (match?.[1]?.trim() || "").replace(/<[^>]+>/g, "");

@@ -6,6 +6,45 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased] — Security & compatibility maintenance
 
+### Security (P0 cycle)
+
+- Added per-resource authorization: every Docker action now loads the compose
+  with `{ _id, userId }` (`lib/authorization.ts`); the project id is no longer
+  a capability.
+- Added RBAC: the first user is `admin` (claimed atomically in
+  `lib/users.ts`), host-wide operations require that role, and non-Expanse
+  projects/containers require `ALLOW_HOST_PROJECT_OPS=true`.
+- Added `lib/composePolicy.ts`: deployed YAML is rejected when it uses
+  `privileged`, `cap_add`, `devices`, `pid/ipc/uts`, `network_mode: host`,
+  sensitive bind mounts or the Docker socket. `build:` and host mounts are
+  opt-in (`ALLOW_COMPOSE_BUILD`, `ALLOW_COMPOSE_HOST_ACCESS`). Every deploy now
+  runs `docker compose config --quiet` before touching the daemon.
+- Closed the registration bypass: `createOrLoginUser` is login-only;
+  `registerUser` and OAuth respect `DISABLE_SIGNUP`, terms and rate limits.
+- `sessionVersion` is part of the JWT and checked on every action; password
+  reset invalidates existing sessions. Reset codes now use CSPRNG.
+- `/api/auth/jwt` has rate limiting, normalizes emails, handles `:` in
+  passwords and guards passwordless accounts.
+- Account deletion now requires the password on the server, deletes projects,
+  shares and reset codes, and no longer redirects to an external form.
+- Third-party telemetry is opt-in (`ENABLE_EXTERNAL_TELEMETRY`), the version
+  check points to `Dinamicas-Electronicas/expanse`, and a CSP header is sent.
+
+### Fixed (P0 cycle)
+
+- Home no longer inspects the `HttpOnly` cookie with `document.cookie`; the
+  project list is shown for authenticated users and logout calls the action.
+- HA configuration is persisted (`haConfig`/`haEnabled`) and reused by restart;
+  the generator produces a runnable non-swarm stack (bridge network, Bitnami
+  Postgres replicas, TCP HAProxy, PgBouncer, backup) validated with the real
+  Compose CLI. HA status is matched by `docker compose ps` `Service`.
+- Destructive actions ask for confirmation; "New project" no longer discards
+  changes on Cancel.
+- Image references are parsed correctly (`registry:5000/app`, digests).
+- Fixed `/api/compose/machine` for Compose files without volumes/networks.
+- Share revalidation points to `/dashboard/deploys`; resetCompose clears the
+  previous project's HA polling.
+
 ### Fixed
 
 - **Stacks with special characters in their name could not be deployed.**
@@ -61,8 +100,29 @@ project uses [Semantic Versioning](https://semver.org/).
   their network definitions (the case that used to break) and no longer prunes
   Docker images as a side effect of the config-only test.
 
+### Repository cleanup
+
+- Removed obsolete planning documents (`PLAN.md`, `TESTING_PLAN.md`,
+  `RELEASE_PLAN.md`) whose content is already delivered or superseded by the
+  shipped code, `docs/SDD.md` and `PRODUCT_ROADMAP.md`.
+- Removed dead code: the upstream `/[locale]/debug` page, unused UI stubs
+  (`fisrtCompose`, `betaBanner`, `betaWarning`, `coreBanner`, `avatar`, `form`,
+  `feature`, `navigation-menu`), the `HATemplateSelector` and playground
+  components that were never mounted (`shareButton`, `integrateGitHubButton`,
+  `createIssueModal`, `logoBackground`), the unused HA panels/nodes/hooks and
+  the compatibility stubs `lib/safe-action.ts`, `lib/library_data.ts`,
+  `lib/config.ts` and `lib/models/user.ts`.
+- Removed duplicated/unused assets (`assets/expanselab.png`, `assets/nagios.png`,
+  `assets/traefik.png`), the legacy `public/terms/index.html` and
+  `public/cgu.pdf`.
+- README rewritten from the current codebase (142 templates, real routes, env
+  vars, architecture, deploy flow and commands).
+
 ### Documentation & attribution
 
+- `docs/SDD.md` reescrito como revisión integral (ciclo 2): 57 hallazgos
+  (2 críticos, 13 altos, 24 medios, 18 bajos) con evidencia `archivo:línea`,
+  diseño de corrección, matriz de autorización, plan P0/P1/P2 y plan de pruebas.
 - README rewritten for the `Dinamicas-Electronicas/expanse` repository:
   corrected clone/image URLs, added index, screenshots and authorship section.
 - Added `CONTRIBUTING.md` and `NOTICE`.

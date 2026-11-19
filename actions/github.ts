@@ -1,4 +1,4 @@
-"use server"
+"use server";
 
 /**
  * Expanse — IDE visual de Docker Compose
@@ -10,42 +10,27 @@
 
 import * as crypto from "node:crypto";
 
-import { getMongoClient } from "@/lib/mongodb";
-import { NextResponse } from "next/server";
+import { getDb } from "@/lib/mongodb";
 import { redirect } from "next/navigation";
-import axios from "axios";
-
-export async function getGithubAccesToken(code: string) {
-    const res = await axios.get(
-        "https://github.com/login/oauth/access_token",
-        {
-            params: {
-                client_id: process.env.GITHUB_CLIENT_ID,
-                client_secret: process.env.GITHUB_CLIENT_SECRET,
-                code: code
-            },
-            headers: {
-                "Accept": "application/json",
-                "Accept-Encoding": "application/json",
-            },
-        }
-    );
-    return res.data.access_token;
-}
+import { clientKey, rateLimit } from "@/lib/rateLimit";
 
 export async function AuthWithGithub(cli: boolean) {
-    const mongodb = await getMongoClient();
-    const db = mongodb.db("expanse")
+    const limit = rateLimit(await clientKey('oauth'), 20, 60 * 60 * 1000);
+    if (!limit.ok) {
+        throw new Error('Too many authentication attempts. Try again later.');
+    }
+
+    const db = await getDb();
     const CSRF_collection = db.collection('csrf_token')
     const randomString = crypto.randomBytes(32).toString('hex');
-    CSRF_collection.insertOne({
+    await CSRF_collection.insertOne({
         token: randomString,
-        createdAt: new Date().getTime() // FIXED: Changed from getDate() to getTime() for proper timestamp
+        createdAt: new Date().getTime()
     })
     const githubClientId = process.env.GITHUB_CLIENT_ID
     const redirectUri = process.env.URL + "/api/auth/external"
     if (!githubClientId) {
-        return NextResponse.json({ msg: "unvaible" }, { status: 500 })
+        throw new Error('GitHub OAuth is not configured');
     }
     const link = `https://github.com/login/oauth/authorize?client_id=${githubClientId}&response_type=code&scope=read:user&redirect_uri=${redirectUri}${cli ? "/cli" : ""}&state=${randomString}`;
     redirect(link)

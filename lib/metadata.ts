@@ -370,8 +370,8 @@ frontend postgres_ha
 backend postgres_nodes
     mode tcp
     balance ${lbConfig.algorithm}
-    option httpchk GET ${lbConfig.healthCheckPath}
-    http-check expect status 200
+    option tcp-check
+    tcp-check connect
 ${serversLines}
 
 listen stats
@@ -380,7 +380,6 @@ listen stats
     stats enable
     stats uri /stats
     stats refresh 10s
-    stats auth admin:admin
 `;
 }
 
@@ -484,180 +483,144 @@ export function generateHACompose(input: HAComposeInput): any {
     const lbConfig = haConfig.loadBalancer;
     const backupConfig = haConfig.backup;
 
-    const replicaCount = replication?.replicas?.length || 2;
-    const clusterName = 'expanse-cluster';
-    const etcdHosts = 'etcd:2379';
+    const replicaCount = Math.max(1, replication?.replicas?.length || 2);
+    const replicationPassword = dbPassword || 'expanse-replication';
 
-    // 1. Add etcd service for coordination
-    compose.services.etcd = {
-        image: 'bitnami/etcd:3.5',
-        environment: {
-            ETCD_NAME: 'etcd',
-            ETCD_DATA_DIR: '/bitnami/etcd',
-            ETCD_ADVERTISE_CLIENT_URLS: 'http://etcd:2379',
-            ETCD_LISTEN_CLIENT_URLS: 'http://0.0.0.0:2379',
-            ETCD_INITIAL_ADVERTISE_PEER_URLS: 'http://etcd:2380',
-            ETCD_LISTEN_PEER_URLS: 'http://0.0.0.0:2380',
-            ETCD_INITIAL_CLUSTER: 'etcd=http://etcd:2380',
-            ETCD_INITIAL_CLUSTER_STATE: 'new',
-            ETCD_INITIAL_CLUSTER_TOKEN: 'expanse-etcd'
-        },
-        volumes: ['etcd-data:/bitnami/etcd'],
-        ports: ['2379:2379', '2380:2380'],
-        healthcheck: {
-            test: ['CMD', 'etcdctl', 'endpoint', 'health'],
-            interval: '10s',
-            timeout: '5s',
-            retries: 5
-        },
-        networks: ['expanse-network'],
-        deploy: {
-            restart_policy: { condition: 'on-failure' }
-        }
-    };
-    compose.volumes['etcd-data'] = {};
+    // Compose (non-swarm) cannot route to an overlay network. Reuse the
+    // project's declared network; if the base compose uses the default
+    // network, leave the generated services on it too.
+    const networkName = Object.keys(compose.networks)[0];
+    const serviceNetworks = networkName ? [networkName] : undefined;
 
-    // 2. Add primary database with Patroni
+    const published = (port: string) => Object.values<any>(compose.services ?? {}).some((service) =>
+        Array.isArray(service?.ports) && service.ports.some((entry: unknown) => {
+            const value = typeof entry === 'string' ? entry : '';
+            return value.startsWith(`${port}:`);
+        }),
+    );
+
+    // Ports are only published by the proxy/pool, never by every database node.
+    const proxyPort = published('5432') ? 15432 : 5432;
+    const poolPort = published('6432') ? 16432 : 6432;
+
     compose.services['db-primary'] = {
-        image: 'postgres:16-alpine',
+        image: 'bitnami/postgresql:16',
+        restart: 'unless-stopped',
         environment: {
-            POSTGRES_PASSWORD: dbPassword,
-            POSTGRES_USER: dbUser,
-            POSTGRES_DB: dbName,
-            PATRONI_SCOPE: clusterName,
-            PATRONI_NAME: 'db-primary',
-            PATRONI_ETCD_HOSTS: etcdHosts,
-            // Patroni config will be mounted as file
+            POSTGRESQL_REPLICATION_MODE: 'master',
+            POSTGRESQL_REPLICATION_USER: 'replicator',
+            POSTGRESQL_REPLICATION_PASSWORD: replicationPassword,
+            POSTGRESQL_USERNAME: dbUser,
+            POSTGRESQL_PASSWORD: dbPassword,
+            POSTGRESQL_DATABASE: dbName,
         },
-        volumes: [
-            'pg-primary-data:/var/lib/postgresql/data',
-            './patroni-primary.yml:/etc/patroni/patroni.yml:ro'
-        ],
-        ports: ['5432:5432'],
+        volumes: ['pg-primary-data:/bitnami/postgresql'],
         healthcheck: {
-            test: ['CMD-SHELL', 'patronictl -c /etc/patroni/patroni.yml list'],
+            test: ['CMD', 'pg_isready', '-U', dbUser, '-d', dbName],
             interval: '10s',
             timeout: '5s',
             retries: 5,
-            start_period: '30s'
+            start_period: '30s',
         },
-        networks: ['expanse-network'],
-        deploy: {
-            placement: { constraints: ['node.role == manager'] },
-            restart_policy: { condition: 'on-failure' }
-        }
+        ...(serviceNetworks ? { networks: serviceNetworks } : {}),
     };
     compose.volumes['pg-primary-data'] = {};
 
-    // 3. Add replica databases with Patroni (scalable)
-    compose.services['db-replica'] = {
-        image: 'postgres:16-alpine',
-        environment: {
-            POSTGRES_PASSWORD: dbPassword,
-            POSTGRES_USER: dbUser,
-            POSTGRES_DB: dbName,
-            PATRONI_SCOPE: clusterName,
-            PATRONI_ETCD_HOSTS: etcdHosts,
-            PATRONI_NAME: 'db-replica-{{.Task.Slot}}'
-        },
-        volumes: [
-            'pg-replica-data:/var/lib/postgresql/data',
-            './patroni-replica.yml:/etc/patroni/patroni.yml:ro'
-        ],
-        ports: ['5432:5432'],
-        healthcheck: {
-            test: ['CMD-SHELL', 'patronictl -c /etc/patroni/patroni.yml list'],
-            interval: '10s',
-            timeout: '5s',
-            retries: 5,
-            start_period: '30s'
-        },
-        networks: ['expanse-network'],
-        deploy: {
-            replicas: replicaCount,
-            restart_policy: { condition: 'on-failure' },
-            placement: { preferences: [{ spread: 'node.labels.zone' }] }
-        }
-    };
-    compose.volumes['pg-replica-data'] = {};
-
-    // 4. Add PgBouncer for connection pooling
-    if (poolConfig?.enabled) {
-        compose.services.pgbouncer = {
-            image: 'edoburu/pgbouncer:latest',
+    for (let index = 1; index <= replicaCount; index += 1) {
+        const serviceName = `db-replica-${index}`;
+        compose.services[serviceName] = {
+            image: 'bitnami/postgresql:16',
+            restart: 'unless-stopped',
             environment: {
-                // DATABASES will be populated at runtime via config file
-                POOL_MODE: poolConfig.mode || 'transaction',
-                MAX_CLIENT_CONN: String(poolConfig.maxConnections || 1000),
-                DEFAULT_POOL_SIZE: String(poolConfig.poolSize || 25),
-                MIN_POOL_SIZE: '5',
-                RESERVE_POOL_SIZE: '5'
+                POSTGRESQL_REPLICATION_MODE: 'replica',
+                POSTGRESQL_MASTER_HOST: 'db-primary',
+                POSTGRESQL_MASTER_PORT_NUMBER: '5432',
+                POSTGRESQL_REPLICATION_USER: 'replicator',
+                POSTGRESQL_REPLICATION_PASSWORD: replicationPassword,
+                POSTGRESQL_PASSWORD: dbPassword,
+                POSTGRESQL_DATABASE: dbName,
             },
-            volumes: ['./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro'],
-            ports: ['6432:6432'],
-            depends_on: {
-                haproxy: { condition: 'service_healthy' }
-            },
-            healthcheck: {
-                test: ['CMD', 'pg_isready', '-h', 'localhost', '-p', '6432', '-U', dbUser],
-                interval: '10s',
-                timeout: '5s',
-                retries: 3
-            },
-            networks: ['expanse-network'],
-            deploy: { restart_policy: { condition: 'on-failure' } }
+            volumes: [`pg-replica-${index}-data:/bitnami/postgresql`],
+            depends_on: { 'db-primary': { condition: 'service_healthy' } },
+            ...(serviceNetworks ? { networks: serviceNetworks } : {}),
         };
+        compose.volumes[`pg-replica-${index}-data`] = {};
     }
 
-    // 5. Add HAProxy for load balancing
+    const backendHost = lbConfig?.enabled ? 'haproxy' : 'db-primary';
+
     if (lbConfig?.enabled) {
         compose.services.haproxy = {
             image: 'haproxy:2.9-alpine',
+            restart: 'unless-stopped',
             volumes: ['./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro'],
-            ports: ['5432:5432', '8404:8404'],
+            ports: [`${proxyPort}:5432`],
+            depends_on: {
+                'db-primary': { condition: 'service_healthy' },
+                ...Object.fromEntries(Array.from({ length: replicaCount }, (_, i) => [
+                    `db-replica-${i + 1}`,
+                    { condition: 'service_started' },
+                ])),
+            },
+            ...(serviceNetworks ? { networks: serviceNetworks } : {}),
             healthcheck: {
                 test: ['CMD', 'haproxy', '-c', '-f', '/usr/local/etc/haproxy/haproxy.cfg'],
                 interval: '10s',
                 timeout: '5s',
-                retries: 3
+                retries: 3,
             },
-            networks: ['expanse-network'],
-            deploy: { restart_policy: { condition: 'on-failure' } }
         };
     }
 
-    // 6. Add backup sidecar if enabled
+    if (poolConfig?.enabled) {
+        compose.services.pgbouncer = {
+            image: 'edoburu/pgbouncer:latest',
+            restart: 'unless-stopped',
+            environment: {
+                POOL_MODE: poolConfig.mode || 'transaction',
+                MAX_CLIENT_CONN: String(poolConfig.maxConnections || 1000),
+                DEFAULT_POOL_SIZE: String(poolConfig.poolSize || 25),
+                MIN_POOL_SIZE: '5',
+                RESERVE_POOL_SIZE: '5',
+            },
+            volumes: ['./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro'],
+            ports: [`${poolPort}:6432`],
+            depends_on: {
+                [backendHost]: { condition: 'service_healthy' },
+            },
+            ...(serviceNetworks ? { networks: serviceNetworks } : {}),
+            healthcheck: {
+                test: ['CMD', 'pg_isready', '-h', 'localhost', '-p', '6432', '-U', dbUser],
+                interval: '10s',
+                timeout: '5s',
+                retries: 3,
+            },
+        };
+    }
+
     if (backupConfig?.enabled && backupConfig.storage === 'local') {
         compose.services.backup = {
-            image: 'postgres:16-alpine',
+            image: 'bitnami/postgresql:16',
+            restart: 'unless-stopped',
             environment: {
                 PGPASSWORD: dbPassword,
-                BACKUP_SCHEDULE: backupConfig.schedule,
-                BACKUP_RETENTION_DAYS: String(backupConfig.retentionDays),
-                DB_HOST: lbConfig?.enabled ? 'haproxy' : 'db-primary',
-                DB_PORT: '5432',
-                DB_NAME: dbName,
-                DB_USER: dbUser
+                PGUSER: dbUser,
+                PGDATABASE: dbName,
+                DB_HOST: backendHost,
+                ...(backupConfig.encryption ? { BACKUP_PASSPHRASE: replicationPassword } : {}),
             },
             volumes: [
                 'pg-backups:/backups',
-                './backup.sh:/backup.sh:ro'
+                './backup.sh:/backup.sh:ro',
             ],
-            command: ['sh', '-c', 'chmod +x /backup.sh && /backup.sh'],
+            command: ['sh', '-c', 'chmod +x /backup.sh && while true; do /backup.sh; sleep 86400; done'],
             depends_on: {
-                haproxy: { condition: 'service_healthy' }
+                [backendHost]: { condition: 'service_healthy' },
             },
-            networks: ['expanse-network'],
-            deploy: { restart_policy: { condition: 'on-failure' } }
+            ...(serviceNetworks ? { networks: serviceNetworks } : {}),
         };
         compose.volumes['pg-backups'] = {};
     }
-
-    // Ensure network exists
-    compose.networks['expanse-network'] = {
-        driver: 'overlay',
-        attachable: true
-    };
 
     return compose;
 }
@@ -673,48 +636,55 @@ export function generateAllHAConfigs(
     dbCredentials: { dbName: string; dbUser: string; dbPassword: string }
 ): Record<string, string> {
     const configs: Record<string, string> = {};
-    const { dbName, dbUser, dbPassword } = dbCredentials;
+    const { dbName } = dbCredentials;
     const lbConfig = haConfig.loadBalancer;
     const poolConfig = haConfig.connectionPool;
     const backupConfig = haConfig.backup;
+    const replicaCount = Math.max(1, haConfig.replication?.replicas?.length || 2);
 
-    // Patroni configs
-    const patroniConfigs = generatePatroniConfigFiles(haConfig, dbCredentials);
-    configs['patroni-primary.yml'] = patroniConfigs.primary;
-    configs['patroni-replica.yml'] = patroniConfigs.replica;
-
-    // HAProxy config
+    // HAProxy runs in TCP mode: HTTP health checks are invalid for Postgres.
     if (lbConfig?.enabled) {
-        const haproxyServers = [
+        const servers = [
             { name: 'db-primary', host: 'db-primary', port: 5432, weight: 100 },
-            { name: 'db-replica-1', host: 'db-replica', port: 5432, weight: 50 },
-            { name: 'db-replica-2', host: 'db-replica', port: 5432, weight: 50 }
+            ...Array.from({ length: replicaCount }, (_, index) => ({
+                name: `db-replica-${index + 1}`,
+                host: `db-replica-${index + 1}`,
+                port: 5432,
+                weight: 50,
+            })),
         ];
-        configs['haproxy.cfg'] = generateHaproxyConfigTCP(lbConfig, haproxyServers);
+        configs['haproxy.cfg'] = generateHaproxyConfigTCP(lbConfig, servers);
     }
 
-    // PgBouncer config
     if (poolConfig?.enabled) {
         const dbHost = lbConfig?.enabled ? 'haproxy' : 'db-primary';
-        configs['pgbouncer.ini'] = generatePgbouncerConfigExtended(poolConfig, dbHost, 5432, dbName, dbUser, dbPassword);
+        configs['pgbouncer.ini'] = generatePgbouncerConfigExtended(
+            poolConfig,
+            dbHost,
+            5432,
+            dbName,
+            dbCredentials.dbUser,
+            dbCredentials.dbPassword,
+        );
     }
 
-    // Backup script
+    // The script reads PGUSER/PGDATABASE/PGPASSWORD/DB_HOST from the container
+    // environment, so no credentials are baked into the file on disk.
     if (backupConfig?.enabled && backupConfig.storage === 'local') {
-        const dbHost = lbConfig?.enabled ? 'haproxy' : 'db-primary';
-        configs['backup.sh'] = `#!/bin/bash
+        const encryption = backupConfig.encryption
+            ? 'gpg --symmetric --batch --passphrase "$BACKUP_PASSPHRASE" --cipher-algo AES256 "$BACKUP_FILE" && rm "$BACKUP_FILE"'
+            : '';
+        configs['backup.sh'] = `#!/bin/sh
 set -e
 BACKUP_DIR="/backups"
 DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="\${BACKUP_DIR}/${dbName}_\${DATE}.sql"
+BACKUP_FILE="\${BACKUP_DIR}/\${PGDATABASE}_\${DATE}.sql"
 
-echo "Starting backup of ${dbName} at $(date)"
-pg_dump -h ${dbHost} -p 5432 -U ${dbUser} -d ${dbName} ${backupConfig.pointInTimeRecovery ? '--wal-method=fetch' : ''} > "\${BACKUP_FILE}"
-${backupConfig.encryption ? 'gpg --symmetric --cipher-algo AES256 "${BACKUP_FILE}" && rm "${BACKUP_FILE}"' : ''}
-echo "Backup completed: \${BACKUP_FILE}${backupConfig.encryption ? '.gpg' : ''}"
-
-# Cleanup old backups
-find \${BACKUP_DIR} -name "${dbName}_*.sql*" -mtime +${backupConfig.retentionDays} -delete
+echo "Starting backup of \${PGDATABASE} at $(date)"
+pg_dump -h "\${DB_HOST}" -p 5432 -U "\${PGUSER}" -d "\${PGDATABASE}" > "\${BACKUP_FILE}"
+${encryption}
+echo "Backup completed: \${BACKUP_FILE}"
+find "\${BACKUP_DIR}" -name "\${PGDATABASE}_*.sql*" -mtime +${backupConfig.retentionDays} -delete
 echo "Cleanup completed"
 `;
     }

@@ -13,8 +13,8 @@ import { Link } from "@/i18n/navigation";
 import { Settings, Rocket, Activity, LogOut, House as HouseIcon, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEffect, useState, useCallback } from "react";
-import { getAllMyComposeOrderByEditDate } from "@/actions/userActions";
-import { getGlobalDockerStats } from "@/actions/dockerActions";
+import { getAllMyComposeOrderByEditDate, logout } from "@/actions/userActions";
+import { getMyProjectsStatus } from "@/actions/dockerActions";
 import { DataTable } from "@/components/display/dataTable";
 import { columns } from "@/components/display/composeTable/colums";
 import ProjectMonitor from "@/components/display/projectMonitor";
@@ -35,20 +35,14 @@ export default function HomePage() {
 
     const checkAndFetch = useCallback(async () => {
         try {
-            const token = document.cookie.split('; ').find(row => row.startsWith('token='));
-            if (!token) {
-                router.push('/login');
-                return;
-            }
-
-            const [composesData, globalStats] = await Promise.all([
+            const [composesData, projectsStatus] = await Promise.all([
                 getAllMyComposeOrderByEditDate(),
-                getGlobalDockerStats()
+                getMyProjectsStatus()
             ]);
 
             const projectStatuses: Record<string, string> = {};
-            if (globalStats && !globalStats.error && globalStats.projects) {
-                globalStats.projects.forEach((proj: any) => {
+            if (Array.isArray(projectsStatus)) {
+                projectsStatus.forEach((proj: any) => {
                     if (proj.Name && proj.Status) {
                         projectStatuses[proj.Name] = proj.Status;
                     }
@@ -139,8 +133,8 @@ export default function HomePage() {
                     <div className="flex items-center gap-2">
                         <LocaleSwitcher />
                         <button
-                            onClick={() => {
-                                document.cookie = 'token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC;';
+                            onClick={async () => {
+                                await logout();
                                 router.push('/login');
                             }}
                             className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold text-xs uppercase tracking-widest text-slate-400 hover:text-white hover:bg-slate-800/50 transition-all font-mono"

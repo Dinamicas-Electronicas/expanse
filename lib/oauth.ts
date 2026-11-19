@@ -8,6 +8,7 @@
 
 import { getDb } from './mongodb';
 import { createSessionToken, setSessionCookie } from './session';
+import { createUserRecord } from './users';
 
 export type OAuthProfile = {
     termsAccepted?: boolean;
@@ -27,22 +28,33 @@ export async function loginOrRegisterOAuthUser(email: string, profile: OAuthProf
         throw new Error('OAuth provider did not return a valid email');
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
     const db = await getDb();
     const users = db.collection('users');
 
-    let user = await users.findOne({ email });
+    const user = await users.findOne({ email: normalizedEmail });
     if (!user) {
-        const isFirstUser = (await users.countDocuments()) === 0;
-        const result = await users.insertOne({
-            email,
-            ...profile,
-            role: isFirstUser ? 'admin' : 'user',
-            createdAt: Date.now(),
+        // OAuth is a signup path too: it must respect the installation switch.
+        if (process.env.DISABLE_SIGNUP && process.env.DISABLE_SIGNUP.toLowerCase() !== 'false') {
+            throw new Error('Signup is disabled');
+        }
+
+        const { id } = await createUserRecord({
+            email: normalizedEmail,
+            passwordHash: '',
+            fields: {
+                termsAccepted: profile.termsAccepted ?? true,
+                brevoId: profile.brevoId ?? null,
+                external: profile.external,
+                infos: profile.infos ?? {},
+            },
         });
-        user = { ...profile, email, _id: result.insertedId, role: isFirstUser ? 'admin' : 'user' };
+
+        await setSessionCookie(await createSessionToken(id, normalizedEmail, 0));
+        return id;
     }
 
     const userId = user._id.toString();
-    await setSessionCookie(await createSessionToken(userId, email));
+    await setSessionCookie(await createSessionToken(userId, normalizedEmail, Number(user.sessionVersion ?? 0)));
     return userId;
 }

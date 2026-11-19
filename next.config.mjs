@@ -30,6 +30,23 @@ const securityHeaders = [
 	{ key: 'X-DNS-Prefetch-Control', value: 'off' },
 ];
 
+const telemetryEnabled = process.env.ENABLE_EXTERNAL_TELEMETRY === 'true';
+
+const contentSecurityPolicy = [
+	"default-src 'self'",
+	`script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://eu-assets.i.posthog.com${telemetryEnabled ? ' https://opentech-ux.org' : ''}`,
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' data: blob: https:",
+	"font-src 'self' data:",
+	`connect-src 'self' ws: wss: https://eu.i.posthog.com https://api.github.com https://hub.docker.com https://github.com${telemetryEnabled ? ' https://cattlemoontwelve.ux-key.com https://opentech-ux.org' : ''}`,
+	"worker-src 'self' blob:",
+	"frame-ancestors 'self'",
+	"base-uri 'none'",
+	"form-action 'self'",
+].join('; ');
+
+securityHeaders.push({ key: 'Content-Security-Policy', value: contentSecurityPolicy });
+
 if ((process.env.URL || '').startsWith('https://')) {
 	securityHeaders.push({ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' });
 }

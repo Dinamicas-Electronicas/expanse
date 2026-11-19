@@ -14,11 +14,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import net from 'net';
+import { randomBytes } from 'node:crypto';
 import YAML from 'yaml';
-import { ensureAuth } from "@/lib/auth";
+import { ActionError, assertManagedProject, requireAdmin, requireCompose, requireUser } from "@/lib/authorization";
+import { validateComposePolicy } from "@/lib/composePolicy";
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
-import { composeMetadata, generateHaproxyConfig, generateHACompose, generateAllHAConfigs } from "@/lib/metadata";
+import { composeMetadata, generateHACompose, generateAllHAConfigs } from "@/lib/metadata";
 import type { DatabaseHAConfig } from "@/types/library";
 import type { HaDeploymentConfig } from "@/components/playground/haDeploymentDialog";
 import { patchComposeYaml } from '@/lib/dockerCompose';
@@ -26,6 +28,7 @@ import {
     assertComposeId,
     assertDockerIdList,
     assertDockerReference,
+    COMPOSE_PROJECT_PREFIX,
     composeProjectName,
     composeWorkDir,
     runCompose as runComposeCli,
@@ -34,149 +37,274 @@ import {
 
 const execAsync = promisify(exec);
 
+function policyOptions(session?: { role: 'admin' | 'user' }) {
+    const hostAccess = process.env.ALLOW_COMPOSE_HOST_ACCESS === 'true';
+    const isAdmin = session?.role === 'admin';
+    return {
+        // Host mounts, builds and the Docker socket are admin-only opt-ins:
+        // they are equivalent to root on the host.
+        allowHostMounts: hostAccess && isAdmin,
+        allowBuild: process.env.ALLOW_COMPOSE_BUILD === 'true' && isAdmin,
+        allowDockerSocket: hostAccess && isAdmin,
+    };
+}
+
+function checkComposePolicy(doc: unknown, session?: { role: 'admin' | 'user' }): { error: string; code: string } | null {
+    const result = validateComposePolicy(doc, policyOptions(session));
+    return result.ok ? null : { error: result.message, code: result.code };
+}
+
+function databaseHaConfigFromDeployment(config: HaDeploymentConfig): DatabaseHAConfig {
+    return {
+        replication: {
+            enabled: config.enabled,
+            mode: 'async',
+            primaryRegion: 'primary',
+            replicas: config.enabled
+                ? Array.from({ length: Math.max(1, config.minReplicas - 1) }, (_, index) => ({
+                    region: `replica-${index + 1}`,
+                    role: 'async' as const,
+                    priority: 50,
+                }))
+                : [],
+        },
+        failover: {
+            enabled: false,
+            timeout: 30,
+            maxRetries: 3,
+            healthCheckInterval: 10,
+            promotionPolicy: 'priority',
+        },
+        connectionPool: {
+            enabled: config.enabled && config.enableConnectionPool,
+            type: 'pgbouncer',
+            mode: 'transaction',
+            poolSize: 25,
+            maxConnections: 100,
+            idleTimeout: 600,
+        },
+        loadBalancer: {
+            enabled: config.enabled && config.enableLoadBalancer,
+            type: 'haproxy',
+            algorithm: 'round-robin',
+            healthCheckPath: '/',
+            stickySessions: false,
+            port: 5432,
+            targetPort: 5432,
+        },
+        backup: {
+            enabled: false,
+            schedule: '0 3 * * *',
+            retentionDays: 7,
+            storage: 'local',
+            encryption: false,
+            pointInTimeRecovery: false,
+        },
+    };
+}
+
+function extractDbCredentials(compose: any) {
+    const services = compose?.services ?? {};
+    const entry = Object.values<any>(services).find((service) =>
+        typeof service?.image === 'string' && service.image.toLowerCase().includes('postgres'),
+    );
+
+    const env = entry?.environment;
+    const get = (key: string): string | undefined => {
+        if (Array.isArray(env)) {
+            const found = env.find((item: string) => typeof item === 'string' && item.startsWith(`${key}=`));
+            return found ? found.slice(key.length + 1) : undefined;
+        }
+        if (env && typeof env === 'object') {
+            const value = env[key];
+            return typeof value === 'string' ? value : undefined;
+        }
+        return undefined;
+    };
+
+    return {
+        dbName: get('POSTGRES_DB') || 'expanse',
+        dbUser: get('POSTGRES_USER') || 'postgres',
+        dbPassword: get('POSTGRES_PASSWORD') || cryptoRandomPassword(),
+    };
+}
+
+function cryptoRandomPassword(): string {
+    return randomBytes(24).toString('base64url');
+}
+
+async function requireProjectAccess(projectName: string, session: Awaited<ReturnType<typeof requireUser>>) {
+    const project = assertDockerReference(projectName, 'project name');
+
+    if (session.role === 'admin') {
+        // Admins can manage any Expanse project; non-Expanse stacks still
+        // require the explicit ALLOW_HOST_PROJECT_OPS opt-in.
+        return assertManagedProject(project);
+    }
+
+    if (project.startsWith(COMPOSE_PROJECT_PREFIX)) {
+        await requireCompose(project.slice(COMPOSE_PROJECT_PREFIX.length), session);
+        return project;
+    }
+
+    throw new ActionError('FORBIDDEN', 'Only administrators can manage host projects');
+}
+
+async function getContainerOwnership(containerId: string): Promise<{ owner: string; project: string }> {
+    const container = assertDockerReference(containerId, 'container id');
+    try {
+        const { stdout } = await runDocker([
+            'inspect', '--format',
+            '{{ index .Config.Labels "com.expanse.owner" }}|{{ index .Config.Labels "com.docker.compose.project" }}',
+            container,
+        ]);
+        const [owner = '', project = ''] = stdout.trim().split('|');
+        const clean = (value: string) => (value && value !== '<no value>' ? value.trim() : '');
+        return { owner: clean(owner), project: clean(project) };
+    } catch {
+        throw new ActionError('CONTAINER_NOT_FOUND', 'Container not found');
+    }
+}
+
+async function requireContainerAccess(containerId: string, session: Awaited<ReturnType<typeof requireUser>>) {
+    const { owner, project } = await getContainerOwnership(containerId);
+
+    if (session.role === 'admin') {
+        if (owner || project.startsWith(COMPOSE_PROJECT_PREFIX)) return;
+        if (process.env.ALLOW_HOST_PROJECT_OPS === 'true') return;
+        throw new ActionError('FORBIDDEN_HOST_CONTAINER', 'Only Expanse containers can be managed');
+    }
+
+    if (owner && owner === session.userId.toString()) return;
+    if (project.startsWith(COMPOSE_PROJECT_PREFIX)) {
+        await requireCompose(project.slice(COMPOSE_PROJECT_PREFIX.length), session);
+        return;
+    }
+
+    throw new ActionError('FORBIDDEN_HOST_CONTAINER', 'Only Expanse containers can be managed');
+}
+
+async function requireVolumeAccess(volumeName: string, session: Awaited<ReturnType<typeof requireUser>>) {
+    const volume = assertDockerReference(volumeName, 'volume name');
+    try {
+        const { stdout } = await runDocker([
+            'volume', 'inspect', '--format',
+            '{{ index .Labels "com.docker.compose.project" }}',
+            volume,
+        ]);
+        const project = stdout.trim();
+        if (project.startsWith(COMPOSE_PROJECT_PREFIX)) {
+            if (session.role === 'admin') return volume;
+            await requireCompose(project.slice(COMPOSE_PROJECT_PREFIX.length), session);
+            return volume;
+        }
+    } catch {
+        throw new ActionError('VOLUME_NOT_FOUND', 'Volume not found');
+    }
+
+    if (session.role === 'admin' && process.env.ALLOW_HOST_PROJECT_OPS === 'true') return volume;
+    throw new ActionError('FORBIDDEN_HOST_VOLUME', 'Only Expanse volumes can be managed');
+}
+
 export async function runCompose(
     composeId: string,
     yamlContent: string,
     haConfig?: HaDeploymentConfig
 ) {
-    await ensureAuth();
+    const session = await requireUser();
     const id = assertComposeId(composeId);
+    // Ownership check: the compose id is not a capability.
+    const doc = await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
     await fs.mkdir(tempDir, { recursive: true });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
-    // Fetch metadata for resource limits
-    const db = await getDb();
-    const collection = db.collection("composes");
-    const doc = await collection.findOne({ _id: new ObjectId(id) });
+    let parsed: any;
+    try {
+        parsed = YAML.parse(yamlContent);
+    } catch {
+        return { success: false, code: 'INVALID_COMPOSE', error: 'The compose file is not valid YAML' };
+    }
+
+    const basePolicy = checkComposePolicy(parsed, session);
+    if (basePolicy) return { success: false, ...basePolicy };
+
     const metadata = doc?.metadata as composeMetadata | undefined;
+    const collection = (await getDb()).collection("composes");
 
-    // Check if compose has HA enabled in database
-    const dbHaConfig = doc?.haConfig as DatabaseHAConfig | undefined;
-    const dbHaEnabled = doc?.haEnabled === true;
+    // Persist the dialog choice only after a successful deploy so a failed
+    // attempt (port collision, invalid YAML) does not leave HA half-enabled.
+    let persistedHa: DatabaseHAConfig | undefined;
+    if (haConfig) {
+        persistedHa = databaseHaConfigFromDeployment(haConfig);
+    }
 
-    let finalYaml = yamlContent;
+    const storedHa = (doc?.haEnabled === true ? doc.haConfig : undefined) as DatabaseHAConfig | undefined;
+    const effectiveHa = persistedHa ?? storedHa;
+
+    let finalYaml = YAML.stringify(parsed);
     let finalConfigs: Record<string, string> = {};
 
-    // If HA is enabled in database, generate full HA compose
-    if (dbHaEnabled && dbHaConfig) {
-        const dbCredentials = {
-            dbName: 'expanse', // Could be extracted from compose env vars
-            dbUser: 'postgres',
-            dbPassword: 'postgres'
-        };
-
-        // Generate HA compose and config files
-        const haResult = await generateHACompose({
-            baseCompose: YAML.parse(yamlContent),
-            haConfig: dbHaConfig,
+    if (effectiveHa?.replication?.enabled) {
+        const dbCredentials = extractDbCredentials(parsed);
+        const haResult = generateHACompose({
+            baseCompose: parsed,
+            haConfig: effectiveHa,
             projectName: `expanse-${id}`,
-            dbCredentials
+            dbCredentials,
         });
 
-        finalYaml = YAML.stringify(haResult);
-        finalConfigs = generateAllHAConfigs(dbHaConfig, dbCredentials);
+        const generatedPolicy = checkComposePolicy(haResult, session);
+        if (generatedPolicy) return { success: false, ...generatedPolicy };
 
-        // Write all HA config files to temp directory
+        finalYaml = YAML.stringify(haResult);
+        finalConfigs = generateAllHAConfigs(effectiveHa, dbCredentials);
+
         for (const [fileName, content] of Object.entries(finalConfigs)) {
             await fs.writeFile(path.join(tempDir, fileName), content);
         }
-    } else {
-        // Legacy HA injection from haDeploymentDialog (for backwards compatibility)
-        const parsedYaml = YAML.parse(yamlContent);
-
-        if (haConfig?.enabled) {
-            // Inject PgBouncer configuration if connection pooling is enabled
-            if (haConfig.enableConnectionPool) {
-                const dbServiceEntry = Object.entries(parsedYaml.services || {}).find(
-                    ([, svc]: [string, any]) => svc.image?.includes('postgres')
-                );
-                if (dbServiceEntry) {
-                    const [svcName, dbSvc] = dbServiceEntry as [string, any];
-                    if (!parsedYaml.services.pgbouncer) {
-                        parsedYaml.services.pgbouncer = {
-                            image: 'edoburu/pgbouncer:latest',
-                            environment: {
-                                DATABASE_URL: `postgres://${dbSvc.environment?.POSTGRES_USER || 'postgres'}:${dbSvc.environment?.POSTGRES_PASSWORD || 'postgres'}@${svcName}:5432/${dbSvc.environment?.POSTGRES_DB || 'postgres'}`,
-                                POOL_MODE: 'transaction',
-                                MAX_CLIENT_CONN: '100',
-                                DEFAULT_POOL_SIZE: '20'
-                            },
-                            ports: ['5439:5432'],
-                            depends_on: {
-                                [svcName]: { condition: 'service_healthy' }
-                            }
-                        };
-                    }
-                }
-            }
-
-            // Inject HAProxy configuration if load balancer is enabled
-            if (haConfig.enableLoadBalancer) {
-                const apiServices = Object.entries(parsedYaml.services || {}).filter(
-                    ([name, svc]: [string, any]) => svc.image?.includes('postgrest') || name === 'api'
-                );
-
-                if (apiServices.length > 0) {
-                    const servers = apiServices.map(([name], idx) => ({
-                        name: `${name}_${idx + 1}`,
-                        host: name,
-                        port: 3000
-                    }));
-
-                    const haproxyConfig = generateHaproxyConfig({
-                        type: 'haproxy',
-                        port: 80,
-                        targetPort: 3000,
-                        algorithm: 'round-robin',
-                        healthCheckPath: '/'
-                    }, servers);
-
-                    await fs.writeFile(path.join(tempDir, 'haproxy.conf'), haproxyConfig);
-
-                    parsedYaml.services.lb = {
-                        image: 'haproxy:2.9-alpine',
-                        ports: ['80:80'],
-                        volumes: ['./haproxy.conf:/usr/local/etc/haproxy/haproxy.cfg:ro'],
-                        depends_on: apiServices.map(([name]) => name).reduce((acc, name) => {
-                            acc[name] = { condition: 'service_started' };
-                            return acc;
-                        }, {} as Record<string, any>)
-                    };
-
-                    if (haConfig.enableConnectionPool && parsedYaml.services.pgbouncer) {
-                        for (const [, svc] of apiServices as Array<[string, any]>) {
-                            if (svc.environment) {
-                                svc.environment.PGRST_DB_URI = `postgres://${parsedYaml.services.pgbouncer.environment.DATABASE_URL.split('@')[1]?.split('/')[0] || 'postgres'}:5439/postgres`;
-                            }
-                        }
-                    }
-
-                    for (const [name] of apiServices) {
-                        if (!parsedYaml.services[name].deploy) {
-                            parsedYaml.services[name].deploy = {};
-                        }
-                        parsedYaml.services[name].deploy.replicas = haConfig.minReplicas;
-                    }
-                }
-            }
-        }
-
-        finalYaml = YAML.stringify(parsedYaml);
     }
 
-    // Patch YAML: inject DB healthchecks + depends_on service_healthy + resource limits
-    const patchedYaml = patchComposeYaml(finalYaml, metadata);
+    // Patch YAML: ownership labels + DB healthchecks + depends_on + limits.
+    const patchedYaml = patchComposeYaml(finalYaml, metadata, {
+        owner: session.userId.toString(),
+        composeId: id,
+    });
     await fs.writeFile(yamlPath, patchedYaml);
 
     try {
+        // Validate with the real Compose CLI before touching the daemon.
+        await runComposeCli(['config', '--quiet'], {
+            project: composeProjectName(id),
+            yamlPath,
+        });
+    } catch (error: any) {
+        const detail = String(error?.stderr || error?.message || 'Invalid compose file').trim().slice(0, 500);
+        return { success: false, code: 'INVALID_COMPOSE', error: detail };
+    }
+
+    try {
         // We use -p to specify a project name based on the ID to avoid collisions
-        const { stdout, stderr } = await runComposeCli(['up', '-d'], {
+        const { stdout, stderr } = await runComposeCli(['up', '-d', '--remove-orphans'], {
             project: composeProjectName(id),
             yamlPath,
         });
         console.log('Docker Compose Up:', stdout);
         if (stderr) console.error('Docker Compose Up Stderr:', stderr);
+
+        if (persistedHa) {
+            await collection.updateOne(
+                { _id: new ObjectId(id), userId: session.userId },
+                {
+                    $set: {
+                        haConfig: persistedHa,
+                        haEnabled: persistedHa.replication?.enabled === true,
+                        haUpdatedAt: Date.now(),
+                    },
+                },
+            );
+        }
+
         return { success: true, message: 'Services started successfully' };
     } catch (error: any) {
         console.error('Docker Compose Up Error:', error);
@@ -184,15 +312,16 @@ export async function runCompose(
         const regex = /:(\d+)(?:\/tcp)?.*(?:already in use|already allocated)/i;
         const match = errText.match(regex) || errText.match(/Bind for.*:(\d+) failed/i);
         if (match) {
-            return { success: false, error: errText, collisionPort: parseInt(match[1]) };
+            return { success: false, code: 'PORT_IN_USE', error: errText, collisionPort: parseInt(match[1]) };
         }
         return { success: false, error: error.message };
     }
 }
 
 export async function stopCompose(composeId: string) {
-    await ensureAuth();
+    const session = await requireUser();
     const id = assertComposeId(composeId);
+    await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
@@ -213,52 +342,64 @@ export async function stopCompose(composeId: string) {
 }
 
 export async function restartCompose(composeId: string, yamlContent: string) {
-    await ensureAuth();
+    const session = await requireUser();
     const id = assertComposeId(composeId);
+    const doc = await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
     await fs.mkdir(tempDir, { recursive: true });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
-    // Fetch metadata for resource limits
-    const db = await getDb();
-    const collection = db.collection("composes");
-    const doc = await collection.findOne({ _id: new ObjectId(id) });
+    let parsed: any;
+    try {
+        parsed = YAML.parse(yamlContent);
+    } catch {
+        return { success: false, code: 'INVALID_COMPOSE', error: 'The compose file is not valid YAML' };
+    }
+
+    const policy = checkComposePolicy(parsed, session);
+    if (policy) return { success: false, ...policy };
+
     const metadata = doc?.metadata as composeMetadata | undefined;
+    const dbHaConfig = (doc?.haEnabled === true ? doc.haConfig : undefined) as DatabaseHAConfig | undefined;
 
-    // Check if compose has HA enabled in database
-    const dbHaConfig = doc?.haConfig as DatabaseHAConfig | undefined;
-    const dbHaEnabled = doc?.haEnabled === true;
-
-    let finalYaml = yamlContent;
+    let finalYaml = YAML.stringify(parsed);
     let finalConfigs: Record<string, string> = {};
 
-    // If HA is enabled in database, generate full HA compose
-    if (dbHaEnabled && dbHaConfig) {
-        const dbCredentials = {
-            dbName: 'expanse',
-            dbUser: 'postgres',
-            dbPassword: 'postgres'
-        };
-
-        const haResult = await generateHACompose({
-            baseCompose: YAML.parse(yamlContent),
+    if (dbHaConfig?.replication?.enabled) {
+        const dbCredentials = extractDbCredentials(parsed);
+        const haResult = generateHACompose({
+            baseCompose: parsed,
             haConfig: dbHaConfig,
             projectName: `expanse-${id}`,
-            dbCredentials
+            dbCredentials,
         });
+
+        const generatedPolicy = checkComposePolicy(haResult, session);
+        if (generatedPolicy) return { success: false, ...generatedPolicy };
 
         finalYaml = YAML.stringify(haResult);
         finalConfigs = generateAllHAConfigs(dbHaConfig, dbCredentials);
 
-        // Write all HA config files to temp directory
         for (const [fileName, content] of Object.entries(finalConfigs)) {
             await fs.writeFile(path.join(tempDir, fileName), content);
         }
     }
 
-    // Patch YAML: inject DB healthchecks + depends_on service_healthy + resource limits
-    const patchedYaml = patchComposeYaml(finalYaml, metadata);
+    const patchedYaml = patchComposeYaml(finalYaml, metadata, {
+        owner: session.userId.toString(),
+        composeId: id,
+    });
     await fs.writeFile(yamlPath, patchedYaml);
+
+    try {
+        await runComposeCli(['config', '--quiet'], {
+            project: composeProjectName(id),
+            yamlPath,
+        });
+    } catch (error: any) {
+        const detail = String(error?.stderr || error?.message || 'Invalid compose file').trim().slice(0, 500);
+        return { success: false, code: 'INVALID_COMPOSE', error: detail };
+    }
 
     try {
         await runComposeCli(['down', '--remove-orphans'], {
@@ -286,8 +427,9 @@ export async function restartCompose(composeId: string, yamlContent: string) {
 }
 
 export async function getComposeStatus(composeId: string) {
-    await ensureAuth();
+    const session = await requireUser();
     const id = assertComposeId(composeId);
+    await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
@@ -321,8 +463,9 @@ export async function getComposeStatus(composeId: string) {
 }
 
 export async function getComposeLogs(composeId: string) {
-    await ensureAuth();
+    const session = await requireUser();
     const id = assertComposeId(composeId);
+    await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
@@ -341,7 +484,9 @@ export async function getComposeLogs(composeId: string) {
 }
 
 export async function getComposeStats(composeId: string) {
-    await ensureAuth();
+    const session = await requireUser();
+    const id = assertComposeId(composeId);
+    await requireCompose(id, session);
     try {
         // Run docker stats with no-stream to get a single snapshot.
         // We filter by project label if possible, or just parse all and filter.
@@ -373,8 +518,34 @@ export async function getComposeStats(composeId: string) {
     }
 }
 
+/**
+ * Status of the projects owned by the current user, without exposing the rest
+ * of the host. The dashboard only needs the compose project names it owns.
+ */
+export async function getMyProjectsStatus() {
+    const session = await requireUser();
+    const composes = await (await getDb())
+        .collection('composes')
+        .find({ userId: session.userId }, { projection: { _id: 1 } })
+        .toArray();
+
+    const names = new Set(composes.map((compose) => composeProjectName(compose._id.toString())));
+    if (names.size === 0) return [];
+
+    try {
+        const { stdout } = await runDocker(['compose', 'ls', '--format', 'json']);
+        if (!stdout.trim()) return [];
+        const parsed = JSON.parse(stdout);
+        const projects = Array.isArray(parsed) ? parsed : [parsed];
+        return projects.filter((project: any) => names.has(project.Name));
+    } catch (error: any) {
+        console.error('Compose ls error:', error);
+        return [];
+    }
+}
+
 export async function getGlobalDockerStats() {
-    await ensureAuth();
+    await requireAdmin();
     try {
         const [projectsRes, containersRes, volumesRes, networksRes, dfRes] = await Promise.all([
             runDocker(['compose', 'ls', '--format', 'json']),
@@ -453,7 +624,7 @@ export async function getGlobalDockerStats() {
 }
 
 export async function getSystemInfo() {
-    await ensureAuth();
+    await requireAdmin();
     try {
         const cpus = os.cpus();
         const totalMemory = os.totalmem();
@@ -484,7 +655,7 @@ export async function getSystemInfo() {
 }
 
 export async function getUsedDockerPorts(): Promise<number[]> {
-    await ensureAuth();
+    await requireUser();
     try {
         const { stdout } = await runDocker(['ps', '--format', '{{.Ports}}']);
         if (!stdout.trim()) return [];
@@ -530,7 +701,7 @@ async function checkPort(port: number): Promise<boolean> {
 }
 
 export async function getAvailablePort(preferred: number): Promise<number> {
-    await ensureAuth();
+    await requireUser();
     const usedDockerPorts = await getUsedDockerPorts();
 
     const isPortFree = async (p: number) => {
@@ -551,9 +722,9 @@ export async function getAvailablePort(preferred: number): Promise<number> {
 }
 
 export async function stopProjectByName(projectName: string) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
-        const project = assertDockerReference(projectName, 'project name');
+        const project = await requireProjectAccess(projectName, session);
         const { stdout, stderr } = await runComposeCli(['stop'], { project });
         console.log('Stop project:', stdout);
         if (stderr) console.error('Stop project stderr:', stderr);
@@ -564,9 +735,9 @@ export async function stopProjectByName(projectName: string) {
 }
 
 export async function removeProjectByName(projectName: string, deleteVolumes: boolean = true) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
-        const project = assertDockerReference(projectName, 'project name');
+        const project = await requireProjectAccess(projectName, session);
         const downArgs = deleteVolumes ? ['down', '--volumes', '--remove-orphans'] : ['down', '--remove-orphans'];
 
         // 1. Try standard compose down (best effort, may fail without yaml file)
@@ -618,8 +789,9 @@ export async function removeProjectByName(projectName: string, deleteVolumes: bo
 }
 
 export async function stopContainer(containerId: string) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
+        await requireContainerAccess(containerId, session);
         const container = assertDockerReference(containerId, 'container id');
         const { stdout } = await runDocker(['stop', container]);
         console.log('Stop container:', stdout);
@@ -630,8 +802,9 @@ export async function stopContainer(containerId: string) {
 }
 
 export async function removeContainer(containerId: string) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
+        await requireContainerAccess(containerId, session);
         const container = assertDockerReference(containerId, 'container id');
         await runDocker(['stop', container]).catch(() => { });
         const { stdout } = await runDocker(['rm', '-f', container]);
@@ -643,9 +816,9 @@ export async function removeContainer(containerId: string) {
 }
 
 export async function removeVolume(volumeName: string) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
-        const volume = assertDockerReference(volumeName, 'volume name');
+        const volume = await requireVolumeAccess(volumeName, session);
         const { stdout } = await runDocker(['volume', 'rm', '-f', volume]);
         console.log('Remove volume:', stdout);
         return { success: true };
@@ -656,9 +829,9 @@ export async function removeVolume(volumeName: string) {
 
 
 export async function getProjectContainers(projectName: string) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
-        const project = assertDockerReference(projectName, 'project name');
+        const project = await requireProjectAccess(projectName, session);
         const { stdout } = await runDocker([
             'ps', '-a',
             '--filter', `label=com.docker.compose.project=${project}`,
@@ -723,7 +896,7 @@ export async function getProjectContainers(projectName: string) {
 }
 
 export async function validateComposePorts(yamlContent: string) {
-    await ensureAuth();
+    await requireUser();
     const doc = YAML.parse(yamlContent);
     const reassignments: Record<string, { old: number, new: number }[]> = {};
     const usedInConfig = new Set<number>();
@@ -773,8 +946,9 @@ export async function validateComposePorts(yamlContent: string) {
 }
 
 export async function execDockerCommand(containerId: string, command: string) {
-    await ensureAuth();
+    const session = await requireUser();
     try {
+        await requireContainerAccess(containerId, session);
         const container = assertDockerReference(containerId, 'container id');
         if (!command || typeof command !== 'string' || command.length > 8192) {
             return { success: false, error: 'Invalid command' };
@@ -791,7 +965,7 @@ export async function execDockerCommand(containerId: string, command: string) {
 }
 
 export async function searchDockerHub(query: string) {
-    await ensureAuth();
+    await requireUser();
     if (!query || query.trim().length < 2) {
         return { results: [], error: null };
     }
@@ -826,7 +1000,7 @@ export async function searchDockerHub(query: string) {
 }
 
 export async function pullDockerImage(imageName: string) {
-    await ensureAuth();
+    await requireUser();
     if (!imageName || !imageName.trim()) {
         return { success: false, error: "Image name is required" };
     }
@@ -845,7 +1019,7 @@ export async function pullDockerImage(imageName: string) {
 }
 
 export async function getLocalImages() {
-    await ensureAuth();
+    await requireAdmin();
     try {
         const { stdout } = await runDocker(['images', '--format', '{{json .}}']);
         if (!stdout.trim()) return { images: [], error: null };
@@ -866,7 +1040,7 @@ export async function getLocalImages() {
 }
 
 export async function dockerSearch(query: string) {
-    await ensureAuth();
+    await requireUser();
     if (!query || typeof query !== 'string' || query.trim().length < 2) {
         return { results: [], error: null };
     }

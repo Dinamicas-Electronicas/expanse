@@ -10,7 +10,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { getAllMyComposeOrderByEditDate } from "@/actions/userActions";
-import { getGlobalDockerStats } from "@/actions/dockerActions";
+import { getMyProjectsStatus } from "@/actions/dockerActions";
 import { DataTable } from "@/components/display/dataTable";
 import { columns } from "@/components/display/composeTable/colums";
 import { Separator } from "@/components/ui/separator";
@@ -24,15 +24,16 @@ export default function Page() {
     const [, setLoading] = useState(false);
 
     const fetchData = useCallback(async () => {
-        const [composesData, globalStats] = await Promise.all([
+        try {
+        const [composesData, projectsStatus] = await Promise.all([
             getAllMyComposeOrderByEditDate(),
-            getGlobalDockerStats()
+            getMyProjectsStatus()
         ]);
 
         // Create a mapping of project names to status from Docker
         const projectStatuses: Record<string, string> = {};
-        if (globalStats && !globalStats.error && globalStats.projects) {
-            globalStats.projects.forEach((proj: any) => {
+        if (Array.isArray(projectsStatus)) {
+            projectsStatus.forEach((proj: any) => {
                 if (proj.Name && proj.Status) {
                     projectStatuses[proj.Name] = proj.Status;
                 }
@@ -62,6 +63,10 @@ export default function Page() {
 
         setComposes(data);
         setLoading(false);
+        } catch (error) {
+            console.error(error);
+            window.location.href = '/login';
+        }
     }, []);
 
     useEffect(() => {
