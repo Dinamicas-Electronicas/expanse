@@ -1,5 +1,13 @@
 "use client"
 
+/**
+ * Expanse — IDE visual de Docker Compose
+ * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+ *
+ * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+ * Consulta el archivo LICENSE en la raíz del proyecto.
+ */
+
 import { usePathname, useRouter } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { Settings, Rocket, Activity, LogOut, House as HouseIcon, Plus } from "lucide-react";

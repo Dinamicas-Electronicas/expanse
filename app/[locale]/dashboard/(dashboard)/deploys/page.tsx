@@ -1,3 +1,11 @@
+/**
+ * Expanse — IDE visual de Docker Compose
+ * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+ *
+ * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+ * Consulta el archivo LICENSE en la raíz del proyecto.
+ */
+
 import { getAllMyShares } from "@/actions/composeActions";
 import { DataTable } from "@/components/display/dataTable";
 import { columns } from "@/components/display/shareTable/colums";

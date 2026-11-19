@@ -1,5 +1,13 @@
 "use client"
 
+/**
+ * Expanse — IDE visual de Docker Compose
+ * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+ *
+ * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+ * Consulta el archivo LICENSE en la raíz del proyecto.
+ */
+
 import { create } from 'zustand';
 import { Compose, Translator, Service, Env, Binding, Image, PortMapping, SuperSet, KeyValue, Network } from "expanse-docker-lib";
 import { generateRandomName } from "@/lib/utils";

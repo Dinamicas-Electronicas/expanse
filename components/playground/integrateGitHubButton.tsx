@@ -1,3 +1,11 @@
+/**
+ * Expanse — IDE visual de Docker Compose
+ * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+ *
+ * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+ * Consulta el archivo LICENSE en la raíz del proyecto.
+ */
+
 import {Popover, PopoverContent, PopoverTrigger} from "@/components/ui/popover";
 import {Button} from "@/components/ui/button";
 import {Copy, Github} from "lucide-react";

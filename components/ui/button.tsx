@@ -1,3 +1,11 @@
+/**
+ * Expanse — IDE visual de Docker Compose
+ * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+ *
+ * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+ * Consulta el archivo LICENSE en la raíz del proyecto.
+ */
+
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
