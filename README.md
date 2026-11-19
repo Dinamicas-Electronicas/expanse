@@ -125,6 +125,29 @@ docker compose up -d --build
 > `SECRET_KEY`, `DB_USER` y `DB_PASS` son obligatorios: `docker compose` falla de
 > forma explícita si faltan, en lugar de arrancar con credenciales por defecto.
 
+### Reconstrucción limpia y autotest
+
+```bash
+# 1. Parar el stack (conserva los volúmenes de datos)
+docker compose down --remove-orphans
+
+# 2. Borrar la imagen y los artefactos de build (no toca otros proyectos)
+docker image rm expanse:local
+docker image prune -f        # solo imágenes colgantes (<none>)
+docker builder prune -af     # caché de construcción
+
+# 3. Reconstruir desde cero y arrancar
+docker compose build --no-cache app
+docker compose up -d
+
+# 4. Verificación automática (contenedores, rutas, APIs y cabeceras)
+pnpm smoke
+```
+
+> Los volúmenes `expanse_expanse_db_data` y `expanse_expanse_exports` **no** se
+> borran con estos comandos. Para empezar de cero también en datos:
+> `docker compose down -v` (¡elimina usuarios y proyectos!).
+
 ```bash
 # Opción 2: Docker Run directo (requiere un MongoDB accesible)
 docker run -d \

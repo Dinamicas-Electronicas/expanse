@@ -9,6 +9,7 @@
 - `pnpm test` — Vitest unit tests (config in `vitest.config.mts`, tests in `tests/`)
 - `pnpm test:docker` — runs the Docker template config/smoke integration test
 - `pnpm audit` — fails on high/critical advisories (`pnpm audit --audit-level=high`)
+- `pnpm smoke` — smoke test against a running instance (containers, routes, APIs, headers)
 - Audit report and threat model: `docs/SDD.md`
 
 ## Security Model

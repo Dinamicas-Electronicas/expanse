@@ -16,7 +16,8 @@
     "test:docker": "RUN_DOCKER_SMOKE=true vitest run tests/integration/dockerTemplates.integration.test.ts",
     "test:docker:all": "RUN_DOCKER_ALL=true vitest run tests/integration/dockerTemplates.integration.test.ts",
     "test:watch": "vitest",
-    "audit": "pnpm audit --audit-level=high"
+    "audit": "pnpm audit --audit-level=high",
+    "smoke": "bash scripts/smoke-test.sh"
   },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",
