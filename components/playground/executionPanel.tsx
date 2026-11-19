@@ -111,6 +111,7 @@ export default function ExecutionPanel({ haConfig }: ExecutionPanelProps) {
                             {service.status === 'running' && (
                                 <button
                                     onClick={() => openTerminal(service.id, service.name)}
+                                    aria-label={t('openTerminal')}
                                     className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600 transition-all opacity-0 group-hover/svc:opacity-100"
                                     title={t('openTerminal')}
                                 >

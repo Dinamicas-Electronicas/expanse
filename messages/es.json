@@ -12,7 +12,8 @@
     "save": "Guardar",
     "add": "Añadir",
     "active": "Activo",
-    "size": "Tamaño"
+    "size": "Tamaño",
+    "accountMenu": "Menú de cuenta"
   },
   "nav": {
     "home": "Inicio",

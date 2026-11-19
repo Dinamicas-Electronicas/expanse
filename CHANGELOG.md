@@ -75,6 +75,9 @@ project uses [Semantic Versioning](https://semver.org/).
 - UI stubs (Google Drive, remote Docker nodes) are disabled and labelled
   “Coming soon”; sharing warns that the public YAML contains environment
   variables. Added `aria-label` to icon-only controls.
+- **Accessibility:** `prefers-reduced-motion` is respected globally; the save
+  status is an `aria-live` region and icon-only account/terminal controls have
+  accessible names.
 
 ### Security (P0 cycle)
 

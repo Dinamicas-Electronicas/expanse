@@ -82,7 +82,7 @@ export default function UnifiedLayout({ children, version }: { children: ReactNo
                     <div className="flex items-center gap-2">
                         <LocaleSwitcher />
                         <DropdownMenu>
-                            <DropdownMenuTrigger className="bg-slate-800/50 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg transition-colors border border-slate-700">
+                            <DropdownMenuTrigger aria-label={common('accountMenu')} className="bg-slate-800/50 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg transition-colors border border-slate-700">
                                 <Settings className="w-4 h-4" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="bg-white rounded-xl shadow-2xl border-slate-100">

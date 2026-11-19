@@ -636,7 +636,7 @@ export default function PlaygroundContent() {
                                 {/* Deploy progress bar — shown during launch */}
                                 <DeployProgress phase={deployPhase} />
 
-                                <p className={cn("text-[10px] font-bold uppercase tracking-widest text-center",
+                                <p role="status" aria-live="polite" className={cn("text-[10px] font-bold uppercase tracking-widest text-center",
                                     isDirty ? "text-amber-400" : "text-slate-500")}>
                                     {isDirty
                                         ? "Unsaved changes"
