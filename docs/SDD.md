@@ -126,6 +126,7 @@ límites de recursos, socket proxy).
 | Retención | STB-15 | Limpieza diaria de PNG exportados y `/tmp/expanse-*` según `EXPORT_RETENTION_DAYS`/`TMP_RETENTION_DAYS`. |
 | Cuotas y límites | STB-15 | `MAX_COMPOSES_PER_USER` (50), `MAX_SERVICES_PER_COMPOSE` (50), `MAX_COMPOSE_BYTES` (1 MB) y `MAX_SCREENSHOT_CHARS` (4 MB); límites de CPU/memoria para app y Mongo en compose. |
 | Operación | ARC-06 | `docs/operations.md`: backup/restore, retención, migraciones, rotación de secretos y respuesta a incidentes. |
+| Migración de emails | STB-22 | `pnpm migrate:emails` normaliza `users.email` (dry-run, rechaza colisiones). |
 
 **Verificación del ciclo 5**
 

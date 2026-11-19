@@ -30,6 +30,7 @@
     "lint": "eslint .",
     "sync-icons": "node scripts/sync-icons.mjs",
     "sanitize-library": "node scripts/sanitize-library.mjs",
+    "migrate:emails": "node scripts/normalize-emails.mjs",
     "license:headers": "node scripts/add-license-header.mjs",
     "license:check": "node scripts/add-license-header.mjs --check",
     "generate-secrets": "node scripts/generate-secrets.mjs",

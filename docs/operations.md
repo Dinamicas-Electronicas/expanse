@@ -49,21 +49,18 @@ La limpieza corre al arrancar (tras 10 min) y cada 24 h.
 ### Emails en minúsculas
 
 El registro y el login normalizan a minúsculas. Antes de crear el índice único
-`users.email` en una base antigua con mayúsculas:
+`users.email` en una base antigua con mayúsculas, usa el script incluido (hace primero un
+dry-run y **se niega** si hay colisiones):
 
-```js
-// mongosh expanse
-db.users.find({ email: { $ne: db.users.findOne().email.toLowerCase() } })
+```bash
+MONGODB_URI="mongodb://…" pnpm migrate:emails
+MONGODB_URI="mongodb://…" pnpm migrate:emails -- --apply
 ```
 
-Actualiza manualmente los duplicados y luego ejecuta:
-
-```js
-db.users.updateMany({}, [{ $set: { email: { $toLower: "$email" } } }])
-```
-
-El índice único se crea de forma idempotente al arrancar (`lib/dbIndexes.ts`).
-Si falla por duplicados, el error queda en los logs y la app sigue arrancando.
+Si el dry-run detecta dos cuentas que colisionarían, resuelve el duplicado manualmente
+antes de aplicar. El índice único se crea de forma idempotente al arrancar
+(`lib/dbIndexes.ts`). Si falla por duplicados, el error queda en los logs y la app sigue
+arrancando.
 
 ### `sessionVersion`
 

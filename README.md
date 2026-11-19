@@ -454,6 +454,7 @@ pnpm sync-icons         # necesario antes de build
 pnpm build              # build de producción (standalone)
 pnpm smoke              # smoke test contra una instancia en marcha
 pnpm license:check      # verifica avisos de autoría
+pnpm migrate:emails     # normaliza emails legacy (dry-run; usa -- --apply)
 pnpm audit              # falla con avisos altos/críticos
 ```
 

@@ -30,6 +30,8 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Operations runbook:** new `docs/operations.md` with `mongodump`/`mongorestore`,
   retention, migrations (`email` lowercase, `sessionVersion`, legacy shares), secret
   rotation and incident response.
+- **Email migration:** `pnpm migrate:emails` normalizes legacy `users.email` values
+  (dry-run by default, refuses collisions before writing).
 
 ### Stability & performance (P1 cycle)
 
