@@ -13,7 +13,7 @@ FROM node:24-alpine AS base
 # Keep the pnpm version in sync with the "packageManager" field in
 # package.json. pnpm >=11 is required because the project settings
 # (overrides, patchedDependencies, allowBuilds) live in pnpm-workspace.yaml.
-ARG PNPM_VERSION=12.3.4
+ARG PNPM_VERSION=12.21.0
 
 # Install dependencies only when needed
 FROM base AS deps

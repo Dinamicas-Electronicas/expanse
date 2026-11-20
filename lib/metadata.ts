@@ -584,7 +584,7 @@ export function generateHACompose(input: HAComposeInput): any {
 
     if (lbConfig?.enabled) {
         compose.services.haproxy = {
-            image: 'haproxy:2.9-alpine',
+            image: 'haproxy:3.2-alpine',
             restart: 'unless-stopped',
             volumes: ['./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro'],
             ports: [`${proxyPort}:5432`],
@@ -607,7 +607,7 @@ export function generateHACompose(input: HAComposeInput): any {
 
     if (poolConfig?.enabled) {
         compose.services.pgbouncer = {
-            image: 'edoburu/pgbouncer:latest',
+            image: 'edoburu/pgbouncer:v1.26.1-p0',
             restart: 'unless-stopped',
             environment: {
                 POOL_MODE: poolConfig.mode || 'transaction',

@@ -15,10 +15,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { execDockerCommand } from "@/actions/dockerActions";
 import { Terminal as TerminalIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Terminal } from "xterm";
-import { FitAddon } from "xterm-addon-fit";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
 import { useTranslations } from "next-intl";
-import "xterm/css/xterm.css";
+import "@xterm/xterm/css/xterm.css";
 
 interface TerminalDialogProps {
     open: boolean;

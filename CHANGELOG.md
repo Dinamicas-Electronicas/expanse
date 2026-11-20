@@ -59,6 +59,28 @@ project uses [Semantic Versioning](https://semver.org/).
 - Docker build no longer sets a dummy `SECRET_KEY` as an `ENV` (removes the
   BuildKit secret warning); it is scoped to the build command.
 
+### Dependencies & base images
+
+- `pnpm audit --audit-level=low`: **0 advisories**.
+- Updated `bcryptjs` 3.0.3, `jose` 6.2.18, `elkjs` 0.12.1, Radix UI,
+  `react-hook-form` 7.92, `@xyflow/react` 12.12.1, `mongodb` 6.22,
+  `react-hot-toast` 2.6.1, `tailwind-merge` 2.6.2 and `@vitejs/plugin-react`.
+- Replaced deprecated `xterm`/`xterm-addon-fit` with `@xterm/xterm` 6 and
+  `@xterm/addon-fit` 0.11.
+- Removed unused dependencies (`cookie`, `mongoose`, `@types/bcrypt*`,
+  `@dagrejs/dagre`, `next-base64-encoder`, `react-simple-typewriter`,
+  `@hookform/resolvers`, `posthog-node`, `@radix-ui/react-avatar`,
+  `@radix-ui/react-navigation-menu`, `@xyflow/system`). `uuid` stays because
+  `expanse-docker-lib` requires it.
+- pnpm 12.21.0 pinned in `packageManager`, Dockerfile and CI.
+- HA images: HAProxy **3.2-alpine** (2.9 EOL), PgBouncer **v1.26.1-p0**,
+  PostgreSQL **16-alpine**, Node **24-alpine**. Builds use `pull: true`.
+- GitHub Actions updated to checkout v7, setup-node v7, pnpm v6, Docker
+  actions v4/v7/v6, Trivy 0.36 and GH Release v3.
+- Major upgrades (Next 16, Tailwind 4, TypeScript 7, ESLint 10, Vitest 5,
+  MongoDB 7, xyflow 13, lucide 1...) are deferred: no open CVEs and they
+  require a code migration, not a data migration.
+
 ### Security & stability review
 
 - **HA Postgres is now maintained:** replaced the unmaintained

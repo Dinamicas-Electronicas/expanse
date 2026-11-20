@@ -4,7 +4,7 @@
 |---|---|
 | Proyecto | Expanse — IDE visual para Docker Compose |
 | Versión | `1.1.5` · commit `f5a0bfd` (+ limpieza de código sin publicar) |
-| Fecha | 19 de noviembre de 2026 |
+| Fecha | 20 de noviembre de 2026 (revisión 6: dependencias y servicios) |
 | Alcance | UI (dashboard, playground, settings), Server Actions, API routes, middleware, generación de Compose/HA, persistencia MongoDB, Docker, i18n y build |
 | Método | Revisión estática línea a línea de `app/`, `actions/`, `components/`, `lib/` y `store/` + `typecheck`, `lint`, `test` y `pnpm audit` |
 | Sustituye | Al SDD del ciclo 1 (auditoría inicial). Los hallazgos ya cerrados se resumen en §2.3 |
@@ -199,6 +199,41 @@ en CI y semanal; retención de 3 tags `sha-*` en Docker Hub.
 **Riesgos residuales de esta superficie:** `execDockerCommand` sigue siendo una shell
 arbitraria dentro de contenedores gestionados (por diseño), el backup HA corre como root y
 PgBouncer usa autenticación `plain` en la red interna. Todos quedan documentados.
+
+### 1.6 Actualización de dependencias y servicios (nov 2026)
+
+**Estado de seguridad:** `pnpm audit --audit-level=low` → **0 advisories**. La imagen
+`expanse:local` → **Trivy HIGH/CRITICAL CLEAN** tras eliminar npm y actualizar.
+
+**Actualizado**
+
+- `bcryptjs` 2.4.3 → **3.0.3**, `jose` 5.10.0 → **6.2.18**, `elkjs` 0.9.3 → **0.12.1**.
+- `xterm`/`xterm-addon-fit` (deprecados) → **`@xterm/xterm` 6.0.0** y
+  **`@xterm/addon-fit` 0.11.0**.
+- Radix UI (label, checkbox, dialog, popover, select, slider, slot, switch, tabs,
+  toggle, tooltip), `react-hook-form` 7.92.0, `@xyflow/react` 12.12.1,
+  `mongodb` 6.22.0, `react-hot-toast` 2.6.1, `tailwind-merge` 2.6.2,
+  `@vitejs/plugin-react` 6.3.0, `@testing-library/jest-dom` 6.9.1.
+- Dependencias no usadas eliminadas: `cookie`, `mongoose`, `@types/bcrypt`,
+  `@types/bcryptjs`, `@dagrejs/dagre`, `next-base64-encoder`,
+  `react-simple-typewriter`, `@hookform/resolvers`, `posthog-node`,
+  `@radix-ui/react-avatar`, `@radix-ui/react-navigation-menu`, `@xyflow/system`.
+  (`uuid` se mantiene porque lo requiere `expanse-docker-lib`.)
+- pnpm **12.21.0** en `packageManager`, Dockerfile y CI.
+- Servicios: HAProxy **3.2-alpine** (2.9 EOL), PgBouncer **v1.26.1-p0** (pin
+  reproducible), PostgreSQL 16-alpine y Node 24-alpine. Builds con `pull: true`
+  para refrescar imágenes base.
+- GitHub Actions a sus últimas mayores: checkout v7, setup-node v7,
+  pnpm/action-setup v6, Docker actions v4/v7/v6, Trivy 0.36, GH Release v3.
+
+**Diferido conscientemente (requiere migración de código, sin CVE actual):**
+Next 16, Tailwind 4, TypeScript 7, ESLint 10, Vitest 5, jsdom 31,
+MongoDB 7/bson 7, `@xyflow/react` 13, lucide-react 1, `@tanstack/react-table` 9,
+uuid 14 y `@types/node` 26. No se inicia una fase de migración de datos/HA.
+
+**Verificación:** `pnpm typecheck`, `pnpm lint`, `pnpm test` (131 OK),
+`pnpm test:docker` (142 plantillas), `pnpm build`, smoke 18/18 y HA real con las
+nuevas imágenes (PostgreSQL 16, HAProxy 3.2, PgBouncer 1.26.1).
 
 ---
 
