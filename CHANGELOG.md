@@ -97,6 +97,16 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Distributed deployment lock:** `lib/deployLock.ts` uses a `deploy_locks`
   collection with an atomic upsert, owner UUID and 2 h TTL, so multiple app
   replicas cannot deploy the same project concurrently.
+- **PgBouncer SCRAM:** HA generator now emits `auth_type=scram-sha-256` and a
+  PostgreSQL-compatible SCRAM verifier in `userlist.txt` (validated with a real
+  PgBouncer 1.26.1 connection). No plaintext client auth remains.
+- **Share isolation:** one unlock cookie per share (`share_access_<id>`) and
+  `getShareAccessState` moved out of the Server Action module to
+  `lib/shareGate.ts` (no public status oracle).
+- **Server-only HA module:** HA generation moved to `lib/ha.ts` so client
+  bundles never include Node crypto or deployment internals.
+- HA Proxy/PgBouncer config files are written with `0600` and the compose work
+  directory with `0700`.
 - **Attribution everywhere:** every source/config file includes the
   “Programa de Dinámicas Electrónicas” notice and contact email; also added to
   metadata, dashboard footer, share page, README and Docker Hub description.

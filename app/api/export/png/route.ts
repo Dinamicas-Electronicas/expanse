@@ -16,6 +16,7 @@ import { getDb } from '@/lib/mongodb';
 import { ObjectId } from 'bson';
 import { isShareActive, isShareProtected } from '@/lib/sharePolicy';
 import { verifyShareAccessToken } from '@/lib/shareAccess';
+import { shareCookieName } from '@/lib/shareGate';
 
 export async function GET(request: NextRequest) {
     try {
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest) {
         // Password-protected shares require the unlock cookie or a signed key.
         if (isShareProtected(share as any)) {
             const token = request.nextUrl.searchParams.get('key')
-                || request.cookies.get('share_access')?.value
+                || request.cookies.get(shareCookieName(shareId))?.value
                 || '';
             if (!verifyShareAccessToken(shareId, token)) {
                 return NextResponse.json({ error: 'Share is password protected' }, { status: 403 });

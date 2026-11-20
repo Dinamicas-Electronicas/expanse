@@ -13,7 +13,7 @@ import YAML from 'yaml';
 import {
   generateAllHAConfigs,
   generateHACompose,
-} from '@/lib/metadata';
+} from '@/lib/ha';
 import type { DatabaseHAConfig } from '@/types/library';
 
 const config: DatabaseHAConfig = {
@@ -101,6 +101,8 @@ describe('HA generation integration', () => {
     expect(configs['pgbouncer.ini']).toContain('pool_mode = transaction');
     expect(configs['pgbouncer.ini']).toContain('listen_port = 6432');
     expect(configs['pgbouncer.ini']).toContain('auth_file');
+    expect(configs['pgbouncer.ini']).toContain('auth_type = scram-sha-256');
+    expect(configs['userlist.txt']).toContain('SCRAM-SHA-256$');
     expect(configs['haproxy.cfg']).toContain('balance roundrobin');
     expect(configs['haproxy.cfg']).toContain('tcp-check');
     expect(configs['primary-init.sh']).toContain('CREATE ROLE');

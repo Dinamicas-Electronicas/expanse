@@ -14,7 +14,8 @@ import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
 import { ensureAuth } from "@/lib/auth";
 import { recordAuditEvent } from "@/lib/auditLog";
-import { generateHACompose, generateAllHAConfigs, type DatabaseHAConfig } from "@/lib/metadata";
+import { generateHACompose, generateAllHAConfigs } from "@/lib/ha";
+import type { DatabaseHAConfig } from "@/types/library";
 import path from 'path';
 import YAML from 'yaml';
 import {

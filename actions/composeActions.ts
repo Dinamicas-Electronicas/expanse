@@ -13,12 +13,11 @@
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
 import { ensureAuth } from "@/lib/auth";
-import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { isValidObjectId } from "@/lib/validation";
 import { isShareActive, isShareProtected, shareExpiresAt } from "@/lib/sharePolicy";
-import { createShareAccessToken, verifyShareAccessToken } from "@/lib/shareAccess";
+import { getShareAccessState, setShareAccessCookie } from "@/lib/shareGate";
 import { clientKey, rateLimit } from "@/lib/rateLimit";
 import { recordAuditEvent } from "@/lib/auditLog";
 
@@ -102,25 +101,6 @@ export async function shareCompose(composeId: string, password?: string) {
     return `${SITE_URL}/share?id=${insert.insertedId.toString()}`;
 }
 
-export type ShareAccessState = { status: 'ok' | 'locked' | 'missing' };
-
-/**
- * Tells the share page whether to render the canvas, a password form or a
- * "not found" state. Only the status is returned, never the compose.
- */
-export async function getShareAccessState(shareId: string): Promise<ShareAccessState> {
-    if (!isValidObjectId(shareId)) return { status: 'missing' };
-
-    const share = await (await getDb()).collection('shares').findOne({ _id: new ObjectId(shareId) });
-    if (!share || !isShareActive(share as any)) return { status: 'missing' };
-    if (!isShareProtected(share as any)) return { status: 'ok' };
-
-    const token = (await cookies()).get('share_access')?.value;
-    if (token && verifyShareAccessToken(shareId, token)) return { status: 'ok' };
-
-    return { status: 'locked' };
-}
-
 /** Verifies the share password and stores a short-lived unlock cookie. */
 export async function unlockShare(shareId: string, password: string): Promise<{ ok: boolean; error?: string }> {
     if (!isValidObjectId(shareId)) return { ok: false, error: 'Share not found' };
@@ -145,16 +125,9 @@ export async function unlockShare(shareId: string, password: string): Promise<{ 
         return { ok: false, error: 'Invalid password' };
     }
 
-    const token = createShareAccessToken(shareId);
-    if (!token) return { ok: false, error: 'Server configuration error' };
-
-    (await cookies()).set('share_access', token, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: (process.env.URL || '').startsWith('https://'),
-        maxAge: 60 * 60,
-    });
+    if (!(await setShareAccessCookie(shareId))) {
+        return { ok: false, error: 'Server configuration error' };
+    }
     await recordAuditEvent({ userId: share.userId ?? null, action: 'share.unlock', resource: shareId });
     return { ok: true };
 }

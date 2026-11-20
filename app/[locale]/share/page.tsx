@@ -10,7 +10,7 @@
 
 import AsyncReadOnlyPlayground from "@/components/playground/asyncReadonlyPlayground";
 import SharePasswordForm from "@/components/playground/sharePasswordForm";
-import { getShareAccessState } from "@/actions/composeActions";
+import { getShareAccessState } from "@/lib/shareGate";
 import { Suspense } from "react";
 import { Link } from "@/i18n/navigation";
 import { Skeleton } from "@/components/ui/skeleton";

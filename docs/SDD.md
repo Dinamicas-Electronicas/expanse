@@ -167,11 +167,11 @@ i18n completa, auditoría axe/contraste, reconexión automática de servicios al
 | S6-03 | Medio | El reset de contraseña limpia MFA: quien controle el email puede saltarse el segundo factor. | Decisión de recuperación; considerar códigos de recuperación o exigir MFA. |
 | S6-04 | Medio | `sessionVersion` se valida en acciones, no en middleware: un JWT revocado aún puede abrir shells de página (sin datos). | Validación en middleware vía endpoint interno o sesión corta. |
 | S6-05 | Medio | Rate limit en memoria y confianza en `X-Forwarded-For` (configurable). | Redis y proxy de confianza para multi-réplica. |
-| S6-06 | Medio | PgBouncer usa `auth_type=plain` y `userlist.txt` en `/tmp`; backup corre como root. | Red interna; migrar a SCRAM y volumen con permisos dedicados. |
+| S6-06 | Medio | ~~PgBouncer usa `auth_type=plain`~~; queda el backup HA como root. | **Parcial:** PgBouncer migrado a SCRAM-SHA-256 con userlist generada; el sidecar de backup sigue como root para escribir el volumen. |
 | S6-07 | Medio | ~~Lock de despliegue en proceso: dos réplicas de la app pueden desplegar a la vez.~~ | **Resuelto:** lock distribuido en MongoDB (`deploy_locks`, TTL 2 h, owner UUID y liberación segura). |
 | S6-08 | Bajo | CSP usa `'unsafe-inline'`/`'unsafe-eval'` (Next/Monaco). | Nonces y endurecimiento progresivo. |
-| S6-09 | Bajo | Cookie de desbloqueo de share global (una a la vez). | Cookie por share (`share_access_<id>`). |
-| S6-10 | Bajo | `getShareAccessState` permite consultar locked/ok por id. | IDs aleatorios; aceptable. |
+| S6-09 | Bajo | ~~Cookie de desbloqueo de share global.~~ | **Resuelto:** cookie por share (`share_access_<id>`). |
+| S6-10 | Bajo | ~~`getShareAccessState` es una Server Action pública.~~ | **Resuelto:** movido a `lib/shareGate.ts` (helper servidor, no action). |
 | S6-11 | Bajo | `ensureAuth` + `requireUser` hacen dos consultas a Mongo por acción. | Cachear el usuario por request. |
 | S6-12 | Alto\* | Socket Docker + root equivalen a administrador del host. | Aceptado por diseño; usar socket proxy, RBAC y registro cerrado. |
 
