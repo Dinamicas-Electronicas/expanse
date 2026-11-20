@@ -146,6 +146,41 @@ P2 queda cerrado salvo **rootless/daemon aislado por tenant**. Ya están MFA, sh
 contraseña y token HMAC, socket proxy, cuotas/límites y migración de emails. Del P1 quedan
 i18n completa, auditoría axe/contraste, reconexión automática de servicios al proxy HA y E2E.
 
+### 1.4 Revisión de seguridad y estabilidad (ciclo 6)
+
+**Verificado en producción**
+
+- Imagen `expanse:local` de 554 MB; Trivy HIGH/CRITICAL **CLEAN** tras eliminar npm.
+- `pnpm smoke`: 18/18 (rutas, redirects, APIs, cabeceras).
+- `/api/ready` con Mongo y Docker OK.
+- Auth/API: JWT, creación de Compose y guardado 200/409; 401 sin sesión.
+- HA real: primario + 2 réplicas + HAProxy + PgBouncer + backup; replicación y
+  consultas vía proxy/pool verificadas, backup generado.
+- 131 tests OK; 142 plantillas validadas con `docker compose config`.
+
+**Riesgos residuales**
+
+| ID | Sev. | Riesgo | Estado / recomendación |
+|---|---|---|---|
+| S6-01 | Alto | `bitnamilegacy/postgresql` es una imagen **legacy sin mantenimiento**. | Migrar a Postgres oficial con init de replicación/Spilo mantenido. Mientras tanto, escanear y actualizar. |
+| S6-02 | Alto | La topología HA no reconecta automáticamente los servicios existentes ni migra datos del Postgres original. | Documentado; integración P1. |
+| S6-03 | Medio | El reset de contraseña limpia MFA: quien controle el email puede saltarse el segundo factor. | Decisión de recuperación; considerar códigos de recuperación o exigir MFA. |
+| S6-04 | Medio | `sessionVersion` se valida en acciones, no en middleware: un JWT revocado aún puede abrir shells de página (sin datos). | Validación en middleware vía endpoint interno o sesión corta. |
+| S6-05 | Medio | Rate limit en memoria y confianza en `X-Forwarded-For` (configurable). | Redis y proxy de confianza para multi-réplica. |
+| S6-06 | Medio | PgBouncer usa `auth_type=plain` y `userlist.txt` en `/tmp`; backup corre como root. | Red interna; migrar a SCRAM y volumen con permisos dedicados. |
+| S6-07 | Medio | Lock de despliegue en proceso: dos réplicas de la app pueden desplegar a la vez. | Lock distribuido en Mongo/Redis. |
+| S6-08 | Bajo | CSP usa `'unsafe-inline'`/`'unsafe-eval'` (Next/Monaco). | Nonces y endurecimiento progresivo. |
+| S6-09 | Bajo | Cookie de desbloqueo de share global (una a la vez). | Cookie por share (`share_access_<id>`). |
+| S6-10 | Bajo | `getShareAccessState` permite consultar locked/ok por id. | IDs aleatorios; aceptable. |
+| S6-11 | Bajo | `ensureAuth` + `requireUser` hacen dos consultas a Mongo por acción. | Cachear el usuario por request. |
+| S6-12 | Alto\* | Socket Docker + root equivalen a administrador del host. | Aceptado por diseño; usar socket proxy, RBAC y registro cerrado. |
+
+\* Crítico si la instancia está expuesta con registro abierto.
+
+**Endurecimientos aplicados en este ciclo:** rate limit en `setupMfa`, `confirmMfa` y
+`disableMfa`; build sin `SECRET_KEY` en `ENV`; imagen sin npm/yarn/corepack; escaneo Trivy
+en CI y semanal; retención de 3 tags `sha-*` en Docker Hub.
+
 ---
 
 ## 2. Alcance, método y estado

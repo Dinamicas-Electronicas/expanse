@@ -229,6 +229,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Documentation & attribution
 
+- README rewritten around the current feature set: MFA, RBAC, Compose policy,
+  password-protected/expiring shares, HA validated in production, quotas,
+  Trivy, GHCR/Docker Hub and operations.
+- New `docs/dockerhub.md` with the Docker Hub repository description.
+- `docs/SDD.md` §1.4 records the final security/stability review, residual
+  risks and the hardening applied in this cycle.
 - `docs/SDD.md` reescrito como revisión integral (ciclo 2): 57 hallazgos
   (2 críticos, 13 altos, 24 medios, 18 bajos) con evidencia `archivo:línea`,
   diseño de corrección, matriz de autorización, plan P0/P1/P2 y plan de pruebas.

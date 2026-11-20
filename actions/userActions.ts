@@ -501,6 +501,9 @@ export async function setupMfa(): Promise<{ secret: string; otpauth: string }> {
     const db = await getDb();
     const users = db.collection("users");
     const userId = new ObjectId(payload.userId as string);
+
+    const limit = rateLimit(`${await clientKey('mfa-setup')}:${userId.toString()}`, 5, 60 * 60 * 1000);
+    if (!limit.ok) throw new Error('Too many MFA setup attempts. Try again later.');
     const user = await users.findOne({ _id: userId }, { projection: { email: 1, mfaEnabled: 1 } });
 
     if (!user) throw new Error("Account not found");
@@ -518,6 +521,9 @@ export async function confirmMfa(code: string): Promise<{ success: true }> {
     const db = await getDb();
     const users = db.collection("users");
     const userId = new ObjectId(payload.userId as string);
+
+    const limit = rateLimit(`${await clientKey('mfa-confirm')}:${userId.toString()}`, 10, 15 * 60 * 1000);
+    if (!limit.ok) throw new Error('Too many attempts. Try again later.');
     const user = await users.findOne({ _id: userId }, { projection: { mfaPendingSecret: 1 } });
 
     if (!user?.mfaPendingSecret) throw new Error("Start the MFA setup first");
@@ -548,6 +554,9 @@ export async function disableMfa(password: string, code?: string): Promise<{ suc
     const db = await getDb();
     const users = db.collection("users");
     const userId = new ObjectId(payload.userId as string);
+
+    const limit = rateLimit(`${await clientKey('mfa-disable')}:${userId.toString()}`, 10, 15 * 60 * 1000);
+    if (!limit.ok) throw new Error('Too many attempts. Try again later.');
     const user = await users.findOne({ _id: userId });
 
     if (!user) throw new Error("Account not found");
