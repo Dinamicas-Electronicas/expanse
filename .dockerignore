@@ -14,9 +14,13 @@ coverage
 *.tsbuildinfo
 .env
 .git
+.github
+docs
+tests
 dist
 dist-ssr
 *.local
+*.md
 
 # Editor directories and files
 .vscode/*

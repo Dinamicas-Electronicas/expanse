@@ -541,6 +541,7 @@ un issue público.
 | `ci.yml` | Push/PR a `main` | Lint, typecheck, licencias, tests y auditoría |
 | `docker-image.yml` | Push/PR a `main`, manual | Build multi-arch y push a **GHCR** en `main`; Docker Hub si hay secretos. Las PR solo construyen. |
 | `test-build.yml` | Otras ramas | Build de prueba sin publicar |
+| `security-scan.yml` | Semanal/manual | Escaneo Trivy de `ghcr.io/...:latest` (HIGH/CRITICAL) |
 | `release.yml` | Tags `v*`, manual | Imagen multi-arquitectura + GitHub Release |
 
 ### Imagen publicada
@@ -557,6 +558,18 @@ docker pull ghcr.io/dinamicas-electronicas/expanse:latest
 
 Para probar el build sin publicar, ejecuta el workflow **Docker Image** con
 `workflow_dispatch` desde la pestaña *Actions*; en una PR solo se construye `amd64`.
+
+### Tamaño y seguridad de la imagen
+
+- Imagen final: ~530 MB sin comprimir por arquitectura (~200 MB comprimida). El
+  repositorio de Docker Hub suma **todas las etiquetas y ambas arquitecturas**, por eso
+  puede mostrar varios GB aunque cada imagen sea mucho menor.
+- El workflow conserva solo los **3 `sha-*` más recientes**; `latest`, `main` y las
+  versiones `v*` se mantienen. Las releases antiguas se acumulan: bórralas manualmente
+  si no las necesitas.
+- La imagen ya no incluye `npm`, `yarn` ni `corepack`; esos paquetes eran la causa
+  principal de los CVEs HIGH del escaneo (6 en `npm`). `test-build.yml` ejecuta Trivy
+  con `HIGH/CRITICAL` y solo falla por vulnerabilidades con fix disponible.
 
 ---
 

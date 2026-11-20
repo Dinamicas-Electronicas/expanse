@@ -101,7 +101,21 @@ db.shares.updateMany(
 4. **Revisa** logs del contenedor (rotación `json-file`, 10 MB × 5).
 5. **Restaura** el último backup si hubo pérdida de datos y documenta el incidente.
 
-## 6. Riesgo del socket Docker
+## 6. Imagen Docker, tamaño y CVEs
+
+- La imagen final no incluye `npm`, `yarn` ni `corepack`; solo Node + el bundle
+  standalone. Esto elimina los CVEs de las dependencias internas de npm que Docker Hub
+  reportaba.
+- El **tamaño del repositorio** en Docker Hub es la suma de todas las etiquetas y de
+  ambas arquitecturas. `docker-image.yml` conserva solo los 3 `sha-*` más recientes;
+  las etiquetas `latest`, `main` y `v*` se mantienen.
+- Para reducir el tamaño manualmente, borra en Docker Hub las etiquetas `sha-*` y las
+  releases antiguas que no uses.
+- `test-build.yml` escanea la imagen con Trivy (`HIGH`/`CRITICAL`, solo con fix
+  disponible). Ejecuta el workflow **Docker Image** con `workflow_dispatch` para
+  reconstruir y republicar `latest` tras actualizar dependencias.
+
+## 7. Riesgo del socket Docker
 
 La app monta `/var/run/docker.sock` y puede ejecutar comandos en contenedores. Por diseño,
 una cuenta autenticada equivale a administrador del host. Para reducir el riesgo:

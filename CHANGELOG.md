@@ -52,7 +52,14 @@ project uses [Semantic Versioning](https://semver.org/).
   Pull requests build `amd64` only and never push.
 - `release.yml` publishes GHCR/Docker Hub images for `v*` tags and creates the
   GitHub Release; also runnable manually with a tag input.
-- `test-build.yml` builds non-main branches with Buildx cache and no push.
+- `test-build.yml` builds non-main branches with Buildx cache and no push, then
+  scans the image with Trivy (HIGH/CRITICAL, fixed only).
+- Docker Hub keeps only the **3 most recent `sha-*` tags**; old tags are
+  pruned automatically on `main` or via `workflow_dispatch`.
+- **Slimmer and safer runtime:** npm, yarn and corepack are removed from the
+  final image, which eliminates the bundled npm dependencies that image
+  scanners reported. `.dockerignore` excludes docs/tests/CI from the build
+  context.
 - **Email migration:** `pnpm migrate:emails` normalizes legacy `users.email` values
   (dry-run by default, refuses collisions before writing).
 

@@ -72,6 +72,23 @@ RUN mkdir -p .next public/exports \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# The runtime only needs `node server.js`: drop npm/yarn/corepack and the Node
+# headers. This removes ~25 MB and, more importantly, the bundled npm
+# dependencies that image scanners report as vulnerable.
+RUN rm -rf \
+      /usr/local/lib/node_modules/npm \
+      /usr/local/lib/node_modules/corepack \
+      /opt/yarn-v* \
+      /usr/local/include/node \
+      /usr/local/bin/npm \
+      /usr/local/bin/npx \
+      /usr/local/bin/corepack \
+      /usr/local/bin/yarn \
+      /usr/local/bin/yarnpkg \
+      /root/.npm \
+      /root/.cache
+
+
 # The compose file runs the container as root so it can access
 # /var/run/docker.sock. This default is used when running the image directly.
 USER nextjs
