@@ -13,6 +13,8 @@ node_modules.*
 coverage
 *.tsbuildinfo
 .env
+.pnpm-store
+public/exports
 .git
 .github
 docs
