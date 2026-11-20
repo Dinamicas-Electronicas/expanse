@@ -69,8 +69,10 @@ describe('HA generation integration', () => {
 
     expect(result.services.app.image).toBe('my-app:latest');
     expect(result.services['db-primary'].environment.POSTGRESQL_PASSWORD).toBe('secret');
+    expect(result.services['db-primary'].image).toBe('bitnamilegacy/postgresql:16');
     expect(result.services['db-replica-1']).toBeDefined();
     expect(result.services['db-replica-2']).toBeDefined();
+    expect(result.services['db-replica-1'].environment.POSTGRESQL_REPLICATION_MODE).toBe('slave');
     expect(result.services.pgbouncer).toBeDefined();
     expect(result.services.haproxy).toBeDefined();
     expect(result.services.backup).toBeDefined();
@@ -88,9 +90,14 @@ describe('HA generation integration', () => {
       'haproxy.cfg',
       'pgbouncer.ini',
       'backup.sh',
+      'userlist.txt',
     ]));
     expect(configs['pgbouncer.ini']).toContain('host=haproxy');
     expect(configs['pgbouncer.ini']).toContain('pool_mode = transaction');
+    expect(configs['pgbouncer.ini']).toContain('listen_port = 6432');
+    expect(configs['pgbouncer.ini']).toContain('auth_file');
+    expect(configs['haproxy.cfg']).toContain('balance roundrobin');
+    expect(configs['haproxy.cfg']).toContain('tcp-check');
     expect(configs['backup.sh']).toContain('pg_dump');
     expect(configs['backup.sh']).toContain('gpg --symmetric');
   });

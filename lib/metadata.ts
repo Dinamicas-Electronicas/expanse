@@ -180,6 +180,15 @@ export function extractHaConfig(template: { loadBalancer?: LoadBalancerConfig; r
     };
 }
 
+function haproxyBalance(algorithm: LoadBalancerConfig['algorithm'] | LoadBalancerConfigExtended['algorithm']): string {
+    switch (algorithm) {
+        case 'least-connections': return 'leastconn';
+        case 'ip-hash': return 'source';
+        case 'round-robin':
+        default: return 'roundrobin';
+    }
+}
+
 export function generateHaproxyConfig(
     lbConfig: LoadBalancerConfig,
     servers: Array<{ name: string; host: string; port: number }>
@@ -205,7 +214,7 @@ frontend postgrest_ha
     default_backend postgrest_nodes
 
 backend postgrest_nodes
-    balance ${lbConfig.algorithm}
+    balance ${haproxyBalance(lbConfig.algorithm)}
     option httpchk GET ${lbConfig.healthCheckPath}
     http-check expect status 200
 ${serversLines}
@@ -369,7 +378,7 @@ frontend postgres_ha
 
 backend postgres_nodes
     mode tcp
-    balance ${lbConfig.algorithm}
+    balance ${haproxyBalance(lbConfig.algorithm)}
     option tcp-check
     tcp-check connect
 ${serversLines}
@@ -402,6 +411,10 @@ export function generatePgbouncerConfigExtended(
 ${dbName} = host=${dbHost} port=${dbPort} dbname=${dbName} user=${dbUser} password=${dbPassword} pool_size=${poolSize}
 
 [pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+auth_type = plain
+auth_file = /etc/pgbouncer/userlist.txt
 pool_mode = ${poolMode}
 max_client_conn = ${maxConnections}
 default_pool_size = ${poolSize}
@@ -504,7 +517,7 @@ export function generateHACompose(input: HAComposeInput): any {
     const poolPort = published('6432') ? 16432 : 6432;
 
     compose.services['db-primary'] = {
-        image: 'bitnami/postgresql:16',
+        image: 'bitnamilegacy/postgresql:16',
         restart: 'unless-stopped',
         environment: {
             POSTGRESQL_REPLICATION_MODE: 'master',
@@ -529,10 +542,10 @@ export function generateHACompose(input: HAComposeInput): any {
     for (let index = 1; index <= replicaCount; index += 1) {
         const serviceName = `db-replica-${index}`;
         compose.services[serviceName] = {
-            image: 'bitnami/postgresql:16',
+            image: 'bitnamilegacy/postgresql:16',
             restart: 'unless-stopped',
             environment: {
-                POSTGRESQL_REPLICATION_MODE: 'replica',
+                POSTGRESQL_REPLICATION_MODE: 'slave',
                 POSTGRESQL_MASTER_HOST: 'db-primary',
                 POSTGRESQL_MASTER_PORT_NUMBER: '5432',
                 POSTGRESQL_REPLICATION_USER: 'replicator',
@@ -583,7 +596,7 @@ export function generateHACompose(input: HAComposeInput): any {
                 MIN_POOL_SIZE: '5',
                 RESERVE_POOL_SIZE: '5',
             },
-            volumes: ['./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro'],
+            volumes: ['./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro', './userlist.txt:/etc/pgbouncer/userlist.txt:ro'],
             ports: [`${poolPort}:6432`],
             depends_on: {
                 [backendHost]: { condition: 'service_healthy' },
@@ -600,8 +613,9 @@ export function generateHACompose(input: HAComposeInput): any {
 
     if (backupConfig?.enabled && backupConfig.storage === 'local') {
         compose.services.backup = {
-            image: 'bitnami/postgresql:16',
+            image: 'bitnamilegacy/postgresql:16',
             restart: 'unless-stopped',
+            user: '0:0',
             environment: {
                 PGPASSWORD: dbPassword,
                 PGUSER: dbUser,
@@ -613,7 +627,7 @@ export function generateHACompose(input: HAComposeInput): any {
                 'pg-backups:/backups',
                 './backup.sh:/backup.sh:ro',
             ],
-            command: ['sh', '-c', 'chmod +x /backup.sh && while true; do /backup.sh; sleep 86400; done'],
+            command: ['sh', '-c', 'while true; do sh /backup.sh; sleep 86400; done'],
             depends_on: {
                 [backendHost]: { condition: 'service_healthy' },
             },
@@ -666,6 +680,7 @@ export function generateAllHAConfigs(
             dbCredentials.dbUser,
             dbCredentials.dbPassword,
         );
+        configs['userlist.txt'] = `"${dbCredentials.dbUser}" "${dbCredentials.dbPassword}"\n`;
     }
 
     // The script reads PGUSER/PGDATABASE/PGPASSWORD/DB_HOST from the container

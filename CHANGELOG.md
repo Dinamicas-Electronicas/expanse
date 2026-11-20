@@ -42,6 +42,23 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Socket proxy example:** `docker-compose.socket-proxy.yml` runs Docker through
   `tecnativa/docker-socket-proxy` (no direct socket mount in the app).
 
+### Fixed — HA production validation
+
+- HA Postgres now uses `bitnamilegacy/postgresql:16`; the old
+  `bitnami/postgresql:16` tag no longer exists on Docker Hub.
+- Bitnami replicas use `POSTGRESQL_REPLICATION_MODE=slave` (the image
+  rejects `replica`); primary/replica streaming replication was verified with
+  real `docker compose up`.
+- HAProxy algorithm names are mapped to valid keywords
+  (`round-robin` → `roundrobin`, `least-connections` → `leastconn`,
+  `ip-hash` → `source`).
+- PgBouncer listens on TCP (`0.0.0.0:6432`) and ships a generated
+  `userlist.txt` + `auth_file`; previously it only listened on a Unix socket.
+- The backup sidecar no longer tries to `chmod` a read-only mount; it runs as
+  root so the backups volume is writable, and the first backup was verified.
+- Docker build no longer sets a dummy `SECRET_KEY` as an `ENV` (removes the
+  BuildKit secret warning); it is scoped to the build command.
+
 ### CI/CD
 
 - `docker-image.yml` publishes to **GHCR** with `GITHUB_TOKEN`

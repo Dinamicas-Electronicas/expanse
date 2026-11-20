@@ -34,8 +34,7 @@ COPY . .
 # Learn more here: https://nextjs.org/telemetry
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV MONGODB_URI="mongodb://localhost:27017"
-ENV SECRET_KEY="dummy_secret_for_build"
-RUN npm install -g pnpm@${PNPM_VERSION} && pnpm sync-icons && pnpm typecheck && pnpm run build
+RUN npm install -g pnpm@${PNPM_VERSION} && pnpm sync-icons && pnpm typecheck && SECRET_KEY="dummy_secret_for_build" pnpm run build
 
 # Production image, copy all the files and run next
 FROM base AS runner
