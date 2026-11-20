@@ -44,11 +44,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Fixed — HA production validation
 
-- HA Postgres now uses `bitnamilegacy/postgresql:16`; the old
-  `bitnami/postgresql:16` tag no longer exists on Docker Hub.
-- Bitnami replicas use `POSTGRESQL_REPLICATION_MODE=slave` (the image
-  rejects `replica`); primary/replica streaming replication was verified with
-  real `docker compose up`.
+- HA Postgres now uses the maintained official `postgres:16-alpine` image.
+  Primary/replica streaming replication is bootstrapped with generated
+  `primary-init.sh` (`CREATE ROLE ... REPLICATION`) and `replica-init.sh`
+  (`pg_basebackup` + `gosu postgres`), and was verified with a real
+  `docker compose up`.
 - HAProxy algorithm names are mapped to valid keywords
   (`round-robin` → `roundrobin`, `least-connections` → `leastconn`,
   `ip-hash` → `source`).
@@ -58,6 +58,23 @@ project uses [Semantic Versioning](https://semver.org/).
   root so the backups volume is writable, and the first backup was verified.
 - Docker build no longer sets a dummy `SECRET_KEY` as an `ENV` (removes the
   BuildKit secret warning); it is scoped to the build command.
+
+### Security & stability review
+
+- **HA Postgres is now maintained:** replaced the unmaintained
+  `bitnamilegacy` image with `postgres:16-alpine`, generated
+  `primary-init.sh`/`replica-init.sh` (`pg_basebackup`) and validated real
+  streaming replication, HAProxy, PgBouncer and backups.
+- **Persistent work directory:** compose files, generated HA config and
+  relative bind mounts live in `EXPANSE_WORK_DIR` (`/app/.expanse`, volume
+  `expanse_work`) instead of ephemeral `/tmp`; directory `0700`, files `0600`.
+- **No shell for system info:** `df` now runs with `execFile` and an argument
+  array; the only remaining `sh -c` uses are the container terminal, HA backup
+  loop and validated restore filename.
+- **MFA brute-force limits** on setup/confirm/disable.
+- **Attribution everywhere:** every source/config file includes the
+  “Programa de Dinámicas Electrónicas” notice and contact email; also added to
+  metadata, dashboard footer, share page, README and Docker Hub description.
 
 ### CI/CD
 

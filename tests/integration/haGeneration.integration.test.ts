@@ -1,5 +1,7 @@
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
@@ -68,11 +70,12 @@ describe('HA generation integration', () => {
     });
 
     expect(result.services.app.image).toBe('my-app:latest');
-    expect(result.services['db-primary'].environment.POSTGRESQL_PASSWORD).toBe('secret');
-    expect(result.services['db-primary'].image).toBe('bitnamilegacy/postgresql:16');
+    expect(result.services['db-primary'].environment.POSTGRES_PASSWORD).toBe('secret');
+    expect(result.services['db-primary'].image).toBe('postgres:16-alpine');
     expect(result.services['db-replica-1']).toBeDefined();
     expect(result.services['db-replica-2']).toBeDefined();
-    expect(result.services['db-replica-1'].environment.POSTGRESQL_REPLICATION_MODE).toBe('slave');
+    expect(result.services['db-replica-1'].environment.MASTER_HOST).toBe('db-primary');
+    expect(result.services['db-replica-1'].environment.REPLICATION_USER).toBe('replicator');
     expect(result.services.pgbouncer).toBeDefined();
     expect(result.services.haproxy).toBeDefined();
     expect(result.services.backup).toBeDefined();
@@ -91,6 +94,8 @@ describe('HA generation integration', () => {
       'pgbouncer.ini',
       'backup.sh',
       'userlist.txt',
+      'primary-init.sh',
+      'replica-init.sh',
     ]));
     expect(configs['pgbouncer.ini']).toContain('host=haproxy');
     expect(configs['pgbouncer.ini']).toContain('pool_mode = transaction');
@@ -98,6 +103,8 @@ describe('HA generation integration', () => {
     expect(configs['pgbouncer.ini']).toContain('auth_file');
     expect(configs['haproxy.cfg']).toContain('balance roundrobin');
     expect(configs['haproxy.cfg']).toContain('tcp-check');
+    expect(configs['primary-init.sh']).toContain('CREATE ROLE');
+    expect(configs['replica-init.sh']).toContain('pg_basebackup');
     expect(configs['backup.sh']).toContain('pg_dump');
     expect(configs['backup.sh']).toContain('gpg --symmetric');
   });

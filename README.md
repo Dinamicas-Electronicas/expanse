@@ -21,8 +21,8 @@
   </p>
 
   <p>
-    Desarrollado y mantenido por <strong>Dinámicas Electrónicas</strong><br/>
-    <a href="mailto:dinamicas.electronicas@gmail.com">dinamicas.electronicas@gmail.com</a>
+    <strong>Expanse es un programa de Dinámicas Electrónicas</strong><br/>
+    Contacto: <a href="mailto:dinamicas.electronicas@gmail.com">dinamicas.electronicas@gmail.com</a>
   </p>
 
   <img src="assets/demo1.png" alt="Expanse — Editor visual de Docker Compose" width="100%" />
@@ -109,6 +109,8 @@ Docker Engine local, todo desde el navegador.
   de CPU/memoria.
 - `docker compose config --quiet` antes de tocar el daemon y **lock por proyecto** para
   evitar despliegues concurrentes.
+- Compose y binds relativos viven en `EXPANSE_WORK_DIR` (volumen `expanse_work`), con
+  permisos `0700` y YAML/config `0600`; en ejecución directa se usa `/tmp`.
 - Arrancar, parar, reiniciar, logs, estado y eliminación por proyecto.
 
 ### 🔄 Alta disponibilidad
@@ -227,7 +229,8 @@ Toda la configuración se pasa por entorno (no se usa `.env` en runtime salvo
 | `ALLOW_HOST_PROJECT_OPS` | No | Admin puede gestionar recursos no-Expanse. |
 | `TRUST_PROXY` | No | Confía en `X-Forwarded-For` para rate limit (pon `false` sin proxy). |
 | `SHARE_TTL_DAYS` | No | Caducidad de shares (`30` por defecto, `0` = nunca). |
-| `EXPORT_RETENTION_DAYS` / `TMP_RETENTION_DAYS` | No | Retención de PNG y `/tmp` (7). |
+| `EXPORT_RETENTION_DAYS` / `TMP_RETENTION_DAYS` | No | Retención de PNG y directorios temporales (7). |
+| `EXPANSE_WORK_DIR` | No | Directorio de trabajo de Compose y binds relativos (`/app/.expanse` en Compose). |
 | `MAX_COMPOSES_PER_USER` / `MAX_SERVICES_PER_COMPOSE` | No | Cuotas (50/50). |
 | `APP_CPUS` / `APP_MEM_LIMIT` | No | Límites del contenedor app (`2.0` / `2g`). |
 | `DB_CPUS` / `DB_MEM_LIMIT` | No | Límites de MongoDB (`1.0` / `1g`). |
@@ -431,8 +434,8 @@ administrador del host. Para instancias expuestas:
 
 Implementado: RBAC/ownership, política de Compose, MFA, shares con caducidad/contraseña,
 sesiones revocables, rate limit, CSP, auditoría, cuotas y sanitización. Riesgos residuales
-documentados en [`docs/SDD.md`](docs/SDD.md) §1.4 (imagen HA legacy, MFA reset por email,
-rate limit en memoria, etc.).
+documentados en [`docs/SDD.md`](docs/SDD.md) §1.4 (MFA reset por email, rate limit en
+memoria, lock de despliegue en proceso, etc.).
 
 Si encuentras una vulnerabilidad, escribe a
 [dinamicas.electronicas@gmail.com](mailto:dinamicas.electronicas@gmail.com) antes de abrir

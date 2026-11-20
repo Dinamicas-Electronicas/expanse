@@ -1,5 +1,7 @@
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
@@ -11,6 +13,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
     title: "Expanse",
+    applicationName: "Expanse",
     description:
         "IDE visual para diseñar, desplegar y monitorear stacks de Docker Compose.",
     authors: [
@@ -21,6 +24,10 @@ export const metadata: Metadata = {
     ],
     creator: "Dinámicas Electrónicas",
     publisher: "Dinámicas Electrónicas",
+    other: {
+        contact: "dinamicas.electronicas@gmail.com",
+        program: "Expanse — Programa de Dinámicas Electrónicas",
+    },
     robots: {
         index: false,
         follow: false,

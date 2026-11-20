@@ -2,6 +2,9 @@
 
 **Design, deploy and monitor Docker Compose stacks from your browser. No YAML required.**
 
+Expanse is a **program of Dinámicas Electrónicas** — contact:
+**dinamicas.electronicas@gmail.com**.
+
 Expanse is a self-hosted visual IDE for Docker Compose: drag services from a curated
 library, connect dependencies on a canvas, and deploy the generated stack with one click.
 It then shows container status, logs, metrics and an integrated terminal.

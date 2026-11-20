@@ -61,7 +61,7 @@ registro como línea base de auditoría; los siguientes quedan **cerrados**:
 | Política de Compose | SEC-22 | `lib/composePolicy.ts` + `docker compose config --quiet` antes de `up`. Montajes sensibles, `privileged`, `cap_add`, `devices`, `network_mode: host` y `build:` se rechazan por defecto. |
 | Registro y auth | SEC-21, SEC-26, SEC-27, SEC-28, SEC-33 | `createOrLoginUser` es solo login; `registerUser`/OAuth respetan `DISABLE_SIGNUP`; primer admin atómico (`lib/users.ts`); códigos de reset con CSPRNG; `sessionVersion` invalida sesiones al resetear; `/api/auth/jwt` con rate limit y parseo correcto. |
 | Portada y logout | FUNC-09 | La portada deja de leer `document.cookie`; el logout llama a la Server Action. |
-| HA | FUNC-01, FUNC-02, FUNC-03 | `haConfig`/`haEnabled` persistidos; generador reescrito (bridge, Bitnami Postgres, réplicas `db-replica-N`, HAProxy TCP, PgBouncer, backup); estado por `Service`; restauración con credenciales reales. |
+| HA | FUNC-01, FUNC-02, FUNC-03 | `haConfig`/`haEnabled` persistidos; generador reescrito (bridge, Postgres oficial `postgres:16-alpine` con scripts de replicación, réplicas `db-replica-N`, HAProxy TCP, PgBouncer, backup); estado por `Service`; restauración con credenciales reales. |
 | Confirmaciones | UX-13, FUNC-06, FUNC-07 | Confirmación antes de borrar/quitar despliegue; «Cancelar» ya no descarta; borrado de cuenta con contraseña en servidor. |
 | Telemetría, versión y CSP | SEC-32, SEC-36 | Script externo solo con `ENABLE_EXTERNAL_TELEMETRY=true`; versión consultada en `Dinamicas-Electronicas/expanse`; CSP añadida. |
 
@@ -127,7 +127,7 @@ límites de recursos, socket proxy).
 | MFA | SEC-28 | TOTP (SHA-1, 30 s) con secreto cifrado AES-256-GCM (`MFA_ENCRYPTION_KEY` o `SECRET_KEY`). Exigido en login web, playground, CLI y `/api/auth/jwt` (`X-OTP`); el reset de contraseña limpia MFA. |
 | Shares con contraseña | SEC-30 | Hash bcrypt opcional por share; formulario de desbloqueo y cookie firmada de 1 h (HMAC) validada por el visor, `/api/compose` y `/api/export/png`. |
 | Socket proxy | SEC-24 | Override `docker-compose.socket-proxy.yml` con `tecnativa/docker-socket-proxy` y `DOCKER_HOST`; la app deja de montar el socket directamente. |
-| HA probado | FUNC-01/02/03 | Desplegado con `docker compose up`: `bitnamilegacy/postgresql:16`, réplica `slave`, HAProxy `roundrobin`, PgBouncer TCP con userlist, backup escribiendo en volumen; replicación y consultas vía proxy/pool verificadas. |
+| HA probado | FUNC-01/02/03 | Desplegado con `docker compose up`: `postgres:16-alpine` con replicación (`pg_basebackup`), HAProxy `roundrobin`, PgBouncer TCP con userlist, backup escribiendo en volumen; replicación y consultas vía proxy/pool verificadas. |
 | CI/CD | — | `docker-image.yml` publica en GHCR con `GITHUB_TOKEN` (Docker Hub opcional), multi-arch, tags semver/sha, SBOM/provenance y cache GHA; `release.yml` publica tags y crea el Release. Runtime sin npm/yarn/corepack y escaneo Trivy en CI. |
 | Cuotas y límites | STB-15 | `MAX_COMPOSES_PER_USER` (50), `MAX_SERVICES_PER_COMPOSE` (50), `MAX_COMPOSE_BYTES` (1 MB) y `MAX_SCREENSHOT_CHARS` (4 MB); límites de CPU/memoria para app y Mongo en compose. |
 | Operación | ARC-06 | `docs/operations.md`: backup/restore, retención, migraciones, rotación de secretos y respuesta a incidentes. |
@@ -162,7 +162,7 @@ i18n completa, auditoría axe/contraste, reconexión automática de servicios al
 
 | ID | Sev. | Riesgo | Estado / recomendación |
 |---|---|---|---|
-| S6-01 | Alto | `bitnamilegacy/postgresql` es una imagen **legacy sin mantenimiento**. | Migrar a Postgres oficial con init de replicación/Spilo mantenido. Mientras tanto, escanear y actualizar. |
+| S6-01 | Alto | ~~`bitnamilegacy/postgresql` es una imagen legacy sin mantenimiento.~~ | **Resuelto:** migrado a `postgres:16-alpine` con scripts de inicialización y replicación; validado con `docker compose up`. |
 | S6-02 | Alto | La topología HA no reconecta automáticamente los servicios existentes ni migra datos del Postgres original. | Documentado; integración P1. |
 | S6-03 | Medio | El reset de contraseña limpia MFA: quien controle el email puede saltarse el segundo factor. | Decisión de recuperación; considerar códigos de recuperación o exigir MFA. |
 | S6-04 | Medio | `sessionVersion` se valida en acciones, no en middleware: un JWT revocado aún puede abrir shells de página (sin datos). | Validación en middleware vía endpoint interno o sesión corta. |
@@ -180,6 +180,25 @@ i18n completa, auditoría axe/contraste, reconexión automática de servicios al
 **Endurecimientos aplicados en este ciclo:** rate limit en `setupMfa`, `confirmMfa` y
 `disableMfa`; build sin `SECRET_KEY` en `ENV`; imagen sin npm/yarn/corepack; escaneo Trivy
 en CI y semanal; retención de 3 tags `sha-*` en Docker Hub.
+
+### 1.5 Superficie de ejecución y rutas de volúmenes
+
+| Superficie | Implementación | Evaluación |
+|---|---|---|
+| `runDocker` / `runCompose` | `execFile('docker', args[])`, IDs validados | Sin shell; no hay interpolación de comandos. |
+| `getSystemInfo` (`df`) | `execFile('df', ['-h', '/'])` | Sin shell; sustituido el antiguo `exec` con `awk`. |
+| Terminal (`execDockerCommand`) | `docker exec <managed> sh -c <command>` | Comando arbitrario **dentro** del contenedor; requiere admin o propiedad, queda en `audit_log`. Aceptado como función de terminal. |
+| Restauración HA | `sh -c 'psql ... < /backups/<file>'` con `assertDockerReference` | Nombre de backup restringido a `[a-zA-Z0-9_.:@/-]`; no hay inyección al host. |
+| Scripts HA | `primary-init.sh`, `replica-init.sh`, `backup.sh` generados | Credenciales por variables; SQL con `psql -v`/identificadores citados. |
+| Bind mounts | Política `composePolicy` | Rechaza `/etc`, `/root`, `/var/run`, `..`, socket; host mounts solo admin con opt-in. |
+| Directorio de trabajo | `EXPANSE_WORK_DIR` (`/app/.expanse` en Compose) | Antes era `/tmp` efímero (pérdida de binds relativos). Ahora volumen persistente, permisos `0700`, YAML/config `0600`. |
+| Exports PNG | `public/exports`, checksum | Retención `EXPORT_RETENTION_DAYS`; nombres derivados de contenido. |
+| Backups HA | volumen `pg-backups` | Sidecar escribe como root para poder crear el volumen; riesgo medio aceptado. |
+| Socket Docker | `/var/run/docker.sock` | Equivale a root del host; aceptado y mitigado con proxy opcional/RBAC. |
+
+**Riesgos residuales de esta superficie:** `execDockerCommand` sigue siendo una shell
+arbitraria dentro de contenedores gestionados (por diseño), el backup HA corre como root y
+PgBouncer usa autenticación `plain` en la red interna. Todos quedan documentados.
 
 ---
 

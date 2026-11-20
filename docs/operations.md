@@ -42,7 +42,7 @@ Variables (ver `.env.example`):
 | `SHARE_TTL_DAYS` | 30 | Caducidad de enlaces compartidos (`0` = nunca). |
 | `audit_log` | 90 días | TTL de MongoDB. |
 
-La limpieza corre al arrancar (tras 10 min) y cada 24 h.
+La limpieza corre al arrancar (tras 10 min) y cada 24 h. Los binds relativos de un Compose se resuelven en `EXPANSE_WORK_DIR` (`/app/.expanse` con el volumen `expanse_work`); ese directorio no se purga automáticamente.
 
 ## 3. Migraciones
 

@@ -2,13 +2,15 @@
 
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
  * Consulta el archivo LICENSE en la raíz del proyecto.
  */
 
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
@@ -38,7 +40,7 @@ import {
     runDocker,
 } from '@/lib/dockerExec';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export type ComposeActionResult = {
     success: boolean;
@@ -228,7 +230,8 @@ async function runComposeInternal(
     // Ownership check: the compose id is not a capability.
     const doc = await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
-    await fs.mkdir(tempDir, { recursive: true });
+    await fs.mkdir(tempDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(tempDir, 0o700).catch(() => { });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     if (yamlContent.length > maxComposeBytes()) {
@@ -277,7 +280,7 @@ async function runComposeInternal(
         finalConfigs = generateAllHAConfigs(effectiveHa, dbCredentials);
 
         for (const [fileName, content] of Object.entries(finalConfigs)) {
-            await fs.writeFile(path.join(tempDir, fileName), content);
+            await fs.writeFile(path.join(tempDir, fileName), content, { mode: 0o600 });
         }
     }
 
@@ -286,7 +289,7 @@ async function runComposeInternal(
         owner: session.userId.toString(),
         composeId: id,
     });
-    await fs.writeFile(yamlPath, patchedYaml);
+    await fs.writeFile(yamlPath, patchedYaml, { mode: 0o600 });
 
     try {
         // Validate with the real Compose CLI before touching the daemon.
@@ -410,7 +413,8 @@ async function restartComposeInternal(composeId: string, yamlContent: string) {
     const id = assertComposeId(composeId);
     const doc = await requireCompose(id, session);
     const tempDir = composeWorkDir(id);
-    await fs.mkdir(tempDir, { recursive: true });
+    await fs.mkdir(tempDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(tempDir, 0o700).catch(() => { });
     const yamlPath = path.join(tempDir, 'docker-compose.yaml');
 
     if (yamlContent.length > maxComposeBytes()) {
@@ -449,7 +453,7 @@ async function restartComposeInternal(composeId: string, yamlContent: string) {
         finalConfigs = generateAllHAConfigs(dbHaConfig, dbCredentials);
 
         for (const [fileName, content] of Object.entries(finalConfigs)) {
-            await fs.writeFile(path.join(tempDir, fileName), content);
+            await fs.writeFile(path.join(tempDir, fileName), content, { mode: 0o600 });
         }
     }
 
@@ -457,7 +461,7 @@ async function restartComposeInternal(composeId: string, yamlContent: string) {
         owner: session.userId.toString(),
         composeId: id,
     });
-    await fs.writeFile(yamlPath, patchedYaml);
+    await fs.writeFile(yamlPath, patchedYaml, { mode: 0o600 });
 
     try {
         await runComposeCli(['config', '--quiet'], {
@@ -705,9 +709,10 @@ export async function getSystemInfo() {
 
         let diskInfo = { total: 'Unknown', used: 'Unknown', free: 'Unknown', usage: '0%' };
         try {
-            const { stdout } = await execAsync('df -h / | awk \'NR==2 {print $2, $3, $4, $5}\''); // static command, no user input
-            const [total, used, free, usage] = stdout.trim().split(/\s+/);
-            diskInfo = { total, used, free, usage };
+            // execFile + argument array: no shell is involved.
+            const { stdout } = await execFileAsync('df', ['-h', '/'], { timeout: 10_000 });
+            const [, total, used, free, usage] = stdout.trim().split('\n')[1]?.split(/\s+/) ?? [];
+            if (total && used && free && usage) diskInfo = { total, used, free, usage };
         } catch (e) {
             console.error("Could not fetch disk info:", e);
         }

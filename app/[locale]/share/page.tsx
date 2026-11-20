@@ -1,5 +1,7 @@
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
@@ -31,7 +33,13 @@ export default async function Page({ searchParams }: { searchParams: SP }) {
                         <p className='text-2xl font-bold'>
                             {name}
                         </p>}
-                    <p className='text-lg'>Created with <Link className="underline font-bold" href={"/"}>Expanse ❤️</Link></p>
+                    <p className='text-sm text-slate-500'>
+                        Created with <Link className="underline font-bold" href={"/"}>Expanse ❤️</Link>
+                        {' · '}Programa de Dinámicas Electrónicas ·{' '}
+                        <a className="underline" href="mailto:dinamicas.electronicas@gmail.com">
+                            dinamicas.electronicas@gmail.com
+                        </a>
+                    </p>
                 </span>
                 {access.status === 'locked' ? (
                     <SharePasswordForm shareId={shareId} />

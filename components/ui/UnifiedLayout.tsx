@@ -2,6 +2,8 @@
 
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
@@ -103,6 +105,13 @@ export default function UnifiedLayout({ children, version }: { children: ReactNo
             <div className="max-w-[100vw] mx-auto w-full px-1">
                 {children}
             </div>
+
+            <footer className="py-4 text-center text-[10px] font-semibold uppercase tracking-widest text-slate-600">
+                Expanse · Programa de Dinámicas Electrónicas ·{' '}
+                <a className="hover:text-slate-400" href="mailto:dinamicas.electronicas@gmail.com">
+                    dinamicas.electronicas@gmail.com
+                </a>
+            </footer>
         </div>
     );
 }

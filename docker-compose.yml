@@ -1,3 +1,11 @@
+# Expanse — IDE visual de Docker Compose
+# Programa de Dinámicas Electrónicas
+# Contacto: dinamicas.electronicas@gmail.com
+# Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+#
+# Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
+# Consulta el archivo LICENSE en la raíz del proyecto.
+
 name: expanse
 
 services:
@@ -19,6 +27,7 @@ services:
       - SHARE_TTL_DAYS=${SHARE_TTL_DAYS:-30}
       - EXPORT_RETENTION_DAYS=${EXPORT_RETENTION_DAYS:-7}
       - TMP_RETENTION_DAYS=${TMP_RETENTION_DAYS:-7}
+      - EXPANSE_WORK_DIR=/app/.expanse
       - MFA_ENCRYPTION_KEY=${MFA_ENCRYPTION_KEY:-}
       - URL=${APP_URL:-http://localhost:4000}
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set; run pnpm generate-secrets}
@@ -52,6 +61,8 @@ services:
       - ./data/library:/app/data/library:ro
       # Generated PNG exports must survive container restarts.
       - expanse_exports:/app/public/exports
+      # Relative bind mounts and HA config persist across restarts.
+      - expanse_work:/app/.expanse
 
   db:
     image: mongo:7.0
@@ -85,3 +96,4 @@ networks:
 volumes:
   expanse_db_data:
   expanse_exports:
+  expanse_work:

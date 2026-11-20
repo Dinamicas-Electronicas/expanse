@@ -1,5 +1,7 @@
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
@@ -40,7 +42,11 @@ export function composeProjectName(composeId: string): string {
 }
 
 export function composeWorkDir(composeId: string): string {
-    return path.join(os.tmpdir(), `expanse-${assertComposeId(composeId)}`);
+    // Persist relative bind mounts and generated HA config when the deployment
+    // provides a volume (docker-compose uses /app/.expanse). Falls back to the
+    // OS temp directory for direct runs and tests.
+    const base = process.env.EXPANSE_WORK_DIR || os.tmpdir();
+    return path.join(base, `expanse-${assertComposeId(composeId)}`);
 }
 
 /** Validates a container/volume/network/image reference before passing it to Docker. */

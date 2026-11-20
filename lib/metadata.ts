@@ -1,5 +1,7 @@
 /**
  * Expanse — IDE visual de Docker Compose
+ * Programa de Dinámicas Electrónicas
+ * Contacto: dinamicas.electronicas@gmail.com
  * Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
  *
  * Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
@@ -517,17 +519,27 @@ export function generateHACompose(input: HAComposeInput): any {
     const poolPort = published('6432') ? 16432 : 6432;
 
     compose.services['db-primary'] = {
-        image: 'bitnamilegacy/postgresql:16',
+        image: 'postgres:16-alpine',
         restart: 'unless-stopped',
         environment: {
-            POSTGRESQL_REPLICATION_MODE: 'master',
-            POSTGRESQL_REPLICATION_USER: 'replicator',
-            POSTGRESQL_REPLICATION_PASSWORD: replicationPassword,
-            POSTGRESQL_USERNAME: dbUser,
-            POSTGRESQL_PASSWORD: dbPassword,
-            POSTGRESQL_DATABASE: dbName,
+            POSTGRES_USER: dbUser,
+            POSTGRES_PASSWORD: dbPassword,
+            POSTGRES_DB: dbName,
+            REPLICATION_USER: 'replicator',
+            REPLICATION_PASSWORD: replicationPassword,
+            PGDATA: '/var/lib/postgresql/data',
         },
-        volumes: ['pg-primary-data:/bitnami/postgresql'],
+        command: [
+            'postgres',
+            '-c', 'wal_level=replica',
+            '-c', 'max_wal_senders=10',
+            '-c', 'hot_standby=on',
+            '-c', 'max_replication_slots=10',
+        ],
+        volumes: [
+            'pg-primary-data:/var/lib/postgresql/data',
+            './primary-init.sh:/docker-entrypoint-initdb.d/10-replication.sh:ro',
+        ],
         healthcheck: {
             test: ['CMD', 'pg_isready', '-U', dbUser, '-d', dbName],
             interval: '10s',
@@ -542,19 +554,27 @@ export function generateHACompose(input: HAComposeInput): any {
     for (let index = 1; index <= replicaCount; index += 1) {
         const serviceName = `db-replica-${index}`;
         compose.services[serviceName] = {
-            image: 'bitnamilegacy/postgresql:16',
+            image: 'postgres:16-alpine',
             restart: 'unless-stopped',
             environment: {
-                POSTGRESQL_REPLICATION_MODE: 'slave',
-                POSTGRESQL_MASTER_HOST: 'db-primary',
-                POSTGRESQL_MASTER_PORT_NUMBER: '5432',
-                POSTGRESQL_REPLICATION_USER: 'replicator',
-                POSTGRESQL_REPLICATION_PASSWORD: replicationPassword,
-                POSTGRESQL_PASSWORD: dbPassword,
-                POSTGRESQL_DATABASE: dbName,
+                MASTER_HOST: 'db-primary',
+                REPLICATION_USER: 'replicator',
+                REPLICATION_PASSWORD: replicationPassword,
+                PGDATA: '/var/lib/postgresql/data',
             },
-            volumes: [`pg-replica-${index}-data:/bitnami/postgresql`],
+            volumes: [
+                `pg-replica-${index}-data:/var/lib/postgresql/data`,
+                './replica-init.sh:/usr/local/bin/replica-init.sh:ro',
+            ],
+            entrypoint: ['/bin/sh', '/usr/local/bin/replica-init.sh'],
             depends_on: { 'db-primary': { condition: 'service_healthy' } },
+            healthcheck: {
+                test: ['CMD', 'pg_isready', '-U', dbUser, '-d', dbName],
+                interval: '10s',
+                timeout: '5s',
+                retries: 10,
+                start_period: '30s',
+            },
             ...(serviceNetworks ? { networks: serviceNetworks } : {}),
         };
         compose.volumes[`pg-replica-${index}-data`] = {};
@@ -613,7 +633,7 @@ export function generateHACompose(input: HAComposeInput): any {
 
     if (backupConfig?.enabled && backupConfig.storage === 'local') {
         compose.services.backup = {
-            image: 'bitnamilegacy/postgresql:16',
+            image: 'postgres:16-alpine',
             restart: 'unless-stopped',
             user: '0:0',
             environment: {
@@ -655,6 +675,38 @@ export function generateAllHAConfigs(
     const poolConfig = haConfig.connectionPool;
     const backupConfig = haConfig.backup;
     const replicaCount = Math.max(1, haConfig.replication?.replicas?.length || 2);
+
+    // Official PostgreSQL image: create the replication role on first init.
+    configs['primary-init.sh'] = `#!/bin/sh
+set -e
+psql -v ON_ERROR_STOP=1 \\
+  -v repl_user="$REPLICATION_USER" \\
+  -v repl_password="$REPLICATION_PASSWORD" \\
+  --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'EOSQL'
+CREATE ROLE :"repl_user" WITH REPLICATION LOGIN PASSWORD :'repl_password';
+EOSQL
+echo "host replication replicator 0.0.0.0/0 scram-sha-256" >> "$PGDATA/pg_hba.conf"
+`;
+
+    // The replica bootstraps itself with pg_basebackup and then starts Postgres
+    // as the unprivileged postgres user.
+    configs['replica-init.sh'] = `#!/bin/sh
+set -e
+: "\${MASTER_HOST:?MASTER_HOST is required}"
+: "\${REPLICATION_USER:?REPLICATION_USER is required}"
+: "\${REPLICATION_PASSWORD:?REPLICATION_PASSWORD is required}"
+export PGPASSFILE=/var/lib/postgresql/.pgpass
+printf '%s:5432:*:%s:%s\\n' "$MASTER_HOST" "$REPLICATION_USER" "$REPLICATION_PASSWORD" > "$PGPASSFILE"
+chown postgres:postgres "$PGPASSFILE"
+chmod 600 "$PGPASSFILE"
+if [ ! -s "$PGDATA/PG_VERSION" ]; then
+  until pg_isready -h "$MASTER_HOST" -p 5432 >/dev/null 2>&1; do sleep 2; done
+  gosu postgres env PGPASSWORD="$REPLICATION_PASSWORD" pg_basebackup -h "$MASTER_HOST" -p 5432 -U "$REPLICATION_USER" -D "$PGDATA" -Fp -Xs -P -R
+fi
+chown -R postgres:postgres "$PGDATA"
+chmod 700 "$PGDATA"
+exec gosu postgres postgres
+`;
 
     // HAProxy runs in TCP mode: HTTP health checks are invalid for Postgres.
     if (lbConfig?.enabled) {

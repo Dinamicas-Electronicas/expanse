@@ -1,7 +1,10 @@
 # syntax=docker.io/docker/dockerfile:1
 
 # Expanse — IDE visual de Docker Compose
+# Programa de Dinámicas Electrónicas
+# Contacto: dinamicas.electronicas@gmail.com
 # Copyright (c) 2026 Dinámicas Electrónicas <dinamicas.electronicas@gmail.com>
+#
 # Este archivo es parte de Expanse y se distribuye bajo la licencia MIT.
 # Consulta el archivo LICENSE en la raíz del proyecto.
 
@@ -63,8 +66,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/data ./data
 
 # Set the correct permission for prerender cache and client exports
-RUN mkdir -p .next public/exports \
-    && chown nextjs:nodejs .next public/exports
+RUN mkdir -p .next public/exports .expanse \
+    && chown nextjs:nodejs .next public/exports .expanse \
+    && chmod 700 .expanse
 
 # Automatically leverage output traces to reduce image size
 # https://nextjs.org/docs/advanced-features/output-file-tracing
