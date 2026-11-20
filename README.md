@@ -202,8 +202,13 @@ docker run -d \
   -e MONGODB_URI="mongodb://usuario:password@host:27017/expanse?authSource=admin" \
   -e URL="http://localhost:4000" \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  <usuario-dockerhub>/expanse:latest
+  ghcr.io/dinamicas-electronicas/expanse:latest
 ```
+
+> La imagen también puede publicarse en Docker Hub si el repositorio define
+> `DOCKER_USERNAME` y `DOCKER_PASSWORD`. GHCR usa `GITHUB_TOKEN` y no necesita secretos
+> adicionales; si el paquete está privado, hazlo público en *Packages* o autentícate con
+> `docker login ghcr.io`.
 
 ### Reconstrucción limpia y verificación
 
@@ -534,12 +539,24 @@ un issue público.
 | Workflow | Cuándo | Qué hace |
 |----------|--------|----------|
 | `ci.yml` | Push/PR a `main` | Lint, typecheck, licencias, tests y auditoría |
-| `docker-image.yml` | Push/PR a `main` | Build de la imagen (y push a Docker Hub en `main`) |
+| `docker-image.yml` | Push/PR a `main`, manual | Build multi-arch y push a **GHCR** en `main`; Docker Hub si hay secretos. Las PR solo construyen. |
 | `test-build.yml` | Otras ramas | Build de prueba sin publicar |
-| `release.yml` | Tags `v*` | Imagen multi-arquitectura + GitHub Release |
+| `release.yml` | Tags `v*`, manual | Imagen multi-arquitectura + GitHub Release |
 
-La imagen se publica para `linux/amd64` y `linux/arm64` usando los secretos
-`DOCKER_USERNAME` y `DOCKER_PASSWORD`.
+### Imagen publicada
+
+```bash
+docker pull ghcr.io/dinamicas-electronicas/expanse:latest
+```
+
+- `linux/amd64` y `linux/arm64`.
+- Tags: `latest`, `sha-<commit>`, `<branch>` y `vX.Y.Z` en releases.
+- **GHCR** usa `GITHUB_TOKEN` con `packages: write` (sin configuración extra).
+- **Docker Hub** es opcional: define `DOCKER_USERNAME` y `DOCKER_PASSWORD` como secretos
+  del repositorio. El workflow limpia tags `sha-*` antiguos.
+
+Para probar el build sin publicar, ejecuta el workflow **Docker Image** con
+`workflow_dispatch` desde la pestaña *Actions*; en una PR solo se construye `amd64`.
 
 ---
 

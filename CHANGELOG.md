@@ -41,6 +41,18 @@ project uses [Semantic Versioning](https://semver.org/).
   rotation and incident response.
 - **Socket proxy example:** `docker-compose.socket-proxy.yml` runs Docker through
   `tecnativa/docker-socket-proxy` (no direct socket mount in the app).
+
+### CI/CD
+
+- `docker-image.yml` publishes to **GHCR** with `GITHUB_TOKEN`
+  (`packages: write`), so no extra secrets are required. Docker Hub remains
+  optional via `DOCKER_USERNAME`/`DOCKER_PASSWORD`.
+- Multi-arch (`linux/amd64`, `linux/arm64`) images with metadata tags
+  (`latest`, branch, `sha-*`, semver), SBOM/provenance and GHA layer cache.
+  Pull requests build `amd64` only and never push.
+- `release.yml` publishes GHCR/Docker Hub images for `v*` tags and creates the
+  GitHub Release; also runnable manually with a tag input.
+- `test-build.yml` builds non-main branches with Buildx cache and no push.
 - **Email migration:** `pnpm migrate:emails` normalizes legacy `users.email` values
   (dry-run by default, refuses collisions before writing).
 

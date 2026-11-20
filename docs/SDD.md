@@ -127,6 +127,7 @@ límites de recursos, socket proxy).
 | MFA | SEC-28 | TOTP (SHA-1, 30 s) con secreto cifrado AES-256-GCM (`MFA_ENCRYPTION_KEY` o `SECRET_KEY`). Exigido en login web, playground, CLI y `/api/auth/jwt` (`X-OTP`); el reset de contraseña limpia MFA. |
 | Shares con contraseña | SEC-30 | Hash bcrypt opcional por share; formulario de desbloqueo y cookie firmada de 1 h (HMAC) validada por el visor, `/api/compose` y `/api/export/png`. |
 | Socket proxy | SEC-24 | Override `docker-compose.socket-proxy.yml` con `tecnativa/docker-socket-proxy` y `DOCKER_HOST`; la app deja de montar el socket directamente. |
+| CI/CD | — | `docker-image.yml` publica en GHCR con `GITHUB_TOKEN` (Docker Hub opcional), multi-arch, tags semver/sha, SBOM/provenance y cache GHA; `release.yml` publica tags y crea el Release. |
 | Cuotas y límites | STB-15 | `MAX_COMPOSES_PER_USER` (50), `MAX_SERVICES_PER_COMPOSE` (50), `MAX_COMPOSE_BYTES` (1 MB) y `MAX_SCREENSHOT_CHARS` (4 MB); límites de CPU/memoria para app y Mongo en compose. |
 | Operación | ARC-06 | `docs/operations.md`: backup/restore, retención, migraciones, rotación de secretos y respuesta a incidentes. |
 | Migración de emails | STB-22 | `pnpm migrate:emails` normaliza `users.email` (dry-run, rechaza colisiones). |
