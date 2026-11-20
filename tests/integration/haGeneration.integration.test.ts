@@ -79,6 +79,8 @@ describe('HA generation integration', () => {
     expect(result.services.pgbouncer).toBeDefined();
     expect(result.services.haproxy).toBeDefined();
     expect(result.services.backup).toBeDefined();
+    expect(result.services['backup-init']).toBeDefined();
+    expect(result.services.backup.user).toBe('postgres');
     expect(Object.values(result.networks).every((network: any) => network?.driver !== 'overlay')).toBe(true);
   });
 

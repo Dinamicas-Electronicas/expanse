@@ -100,6 +100,9 @@ project uses [Semantic Versioning](https://semver.org/).
 - **PgBouncer SCRAM:** HA generator now emits `auth_type=scram-sha-256` and a
   PostgreSQL-compatible SCRAM verifier in `userlist.txt` (validated with a real
   PgBouncer 1.26.1 connection). No plaintext client auth remains.
+- **Backup sin root:** a one-shot `backup-init` chowns the volume and the
+  long-lived backup loop runs as the `postgres` user (verified: files owned by
+  postgres).
 - **Share isolation:** one unlock cookie per share (`share_access_<id>`) and
   `getShareAccessState` moved out of the Server Action module to
   `lib/shareGate.ts` (no public status oracle).

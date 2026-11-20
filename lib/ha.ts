@@ -479,10 +479,23 @@ export function generateHACompose(input: HAComposeInput): any {
     }
 
     if (backupConfig?.enabled && backupConfig.storage === 'local') {
+        compose.volumes['pg-backups'] = {};
+
+        // The named volume is created as root; chown it once, then run the
+        // long-lived backup loop as the unprivileged postgres user.
+        compose.services['backup-init'] = {
+            image: 'postgres:16-alpine',
+            restart: 'no',
+            user: '0:0',
+            volumes: ['pg-backups:/backups'],
+            command: ['sh', '-c', 'chown -R postgres:postgres /backups'],
+            ...(serviceNetworks ? { networks: serviceNetworks } : {}),
+        };
+
         compose.services.backup = {
             image: 'postgres:16-alpine',
             restart: 'unless-stopped',
-            user: '0:0',
+            user: 'postgres',
             environment: {
                 PGPASSWORD: dbPassword,
                 PGUSER: dbUser,
@@ -497,10 +510,10 @@ export function generateHACompose(input: HAComposeInput): any {
             command: ['sh', '-c', 'while true; do sh /backup.sh; sleep 86400; done'],
             depends_on: {
                 [backendHost]: { condition: 'service_healthy' },
+                'backup-init': { condition: 'service_completed_successfully' },
             },
             ...(serviceNetworks ? { networks: serviceNetworks } : {}),
         };
-        compose.volumes['pg-backups'] = {};
     }
 
     return compose;
