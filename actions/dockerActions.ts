@@ -22,6 +22,7 @@ import { ActionError, assertManagedProject, requireAdmin, requireCompose, requir
 import { validateComposePolicy } from "@/lib/composePolicy";
 import { recordAuditEvent } from "@/lib/auditLog";
 import { maxComposeBytes, maxServicesPerCompose } from "@/lib/limits";
+import { acquireDeployLock, releaseDeployLock } from "@/lib/deployLock";
 import { formatPort, parsePortEntry } from "@/lib/ports";
 import { getDb } from "@/lib/mongodb";
 import { ObjectId } from "bson";
@@ -346,41 +347,45 @@ async function runComposeInternal(
     }
 }
 
-const composeLocks = new Set<string>();
-
-function acquireComposeLock(id: string): (() => void) | null {
-    if (composeLocks.has(id)) return null;
-    composeLocks.add(id);
-    return () => composeLocks.delete(id);
-}
-
 export async function runCompose(
     composeId: string,
     yamlContent: string,
     haConfig?: HaDeploymentConfig
 ): Promise<ComposeActionResult> {
     const id = assertComposeId(composeId);
-    const release = acquireComposeLock(id);
-    if (!release) {
+    let owner: string | null;
+    try {
+        owner = await acquireDeployLock(id);
+    } catch (error: any) {
+        console.error('[deployLock] acquire error:', error);
+        return { success: false, code: 'LOCK_ERROR', error: 'Could not acquire the deployment lock' };
+    }
+    if (!owner) {
         return { success: false, code: 'DEPLOY_IN_PROGRESS', error: 'A deployment is already in progress for this project' };
     }
     try {
         return await runComposeInternal(id, yamlContent, haConfig);
     } finally {
-        release();
+        await releaseDeployLock(id, owner);
     }
 }
 
 export async function restartCompose(composeId: string, yamlContent: string): Promise<ComposeActionResult> {
     const id = assertComposeId(composeId);
-    const release = acquireComposeLock(id);
-    if (!release) {
+    let owner: string | null;
+    try {
+        owner = await acquireDeployLock(id);
+    } catch (error: any) {
+        console.error('[deployLock] acquire error:', error);
+        return { success: false, code: 'LOCK_ERROR', error: 'Could not acquire the deployment lock' };
+    }
+    if (!owner) {
         return { success: false, code: 'DEPLOY_IN_PROGRESS', error: 'A deployment is already in progress for this project' };
     }
     try {
         return await restartComposeInternal(id, yamlContent);
     } finally {
-        release();
+        await releaseDeployLock(id, owner);
     }
 }
 

@@ -94,6 +94,9 @@ project uses [Semantic Versioning](https://semver.org/).
   array; the only remaining `sh -c` uses are the container terminal, HA backup
   loop and validated restore filename.
 - **MFA brute-force limits** on setup/confirm/disable.
+- **Distributed deployment lock:** `lib/deployLock.ts` uses a `deploy_locks`
+  collection with an atomic upsert, owner UUID and 2 h TTL, so multiple app
+  replicas cannot deploy the same project concurrently.
 - **Attribution everywhere:** every source/config file includes the
   “Programa de Dinámicas Electrónicas” notice and contact email; also added to
   metadata, dashboard footer, share page, README and Docker Hub description.

@@ -333,7 +333,7 @@ APIs: `GET /api/ping` (liveness), `GET /api/ready` (Mongo + Docker),
 - `users`: email único, hash bcrypt, rol, `sessionVersion`, MFA cifrado.
 - `composes`: `userId`, `data`, `metadata`, `haConfig`, `haEnabled`, timestamps.
 - `shares`: compose, `access`, `expiresAt`, `passwordHash`.
-- `reset_code`, `csrf_token`, `audit_log` con TTL.
+- `reset_code`, `csrf_token`, `audit_log` y `deploy_locks` con TTL.
 - Índices creados en `lib/dbIndexes.ts` al arrancar.
 
 ### Flujo de despliegue

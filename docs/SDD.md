@@ -168,7 +168,7 @@ i18n completa, auditoría axe/contraste, reconexión automática de servicios al
 | S6-04 | Medio | `sessionVersion` se valida en acciones, no en middleware: un JWT revocado aún puede abrir shells de página (sin datos). | Validación en middleware vía endpoint interno o sesión corta. |
 | S6-05 | Medio | Rate limit en memoria y confianza en `X-Forwarded-For` (configurable). | Redis y proxy de confianza para multi-réplica. |
 | S6-06 | Medio | PgBouncer usa `auth_type=plain` y `userlist.txt` en `/tmp`; backup corre como root. | Red interna; migrar a SCRAM y volumen con permisos dedicados. |
-| S6-07 | Medio | Lock de despliegue en proceso: dos réplicas de la app pueden desplegar a la vez. | Lock distribuido en Mongo/Redis. |
+| S6-07 | Medio | ~~Lock de despliegue en proceso: dos réplicas de la app pueden desplegar a la vez.~~ | **Resuelto:** lock distribuido en MongoDB (`deploy_locks`, TTL 2 h, owner UUID y liberación segura). |
 | S6-08 | Bajo | CSP usa `'unsafe-inline'`/`'unsafe-eval'` (Next/Monaco). | Nonces y endurecimiento progresivo. |
 | S6-09 | Bajo | Cookie de desbloqueo de share global (una a la vez). | Cookie por share (`share_access_<id>`). |
 | S6-10 | Bajo | `getShareAccessState` permite consultar locked/ok por id. | IDs aleatorios; aceptable. |

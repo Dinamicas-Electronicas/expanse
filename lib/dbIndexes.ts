@@ -40,6 +40,7 @@ export function ensureIndexes(): Promise<void> {
             ['audit_log.createdAt (ttl 90d)', db.collection('audit_log').createIndex({ createdAt: 1 }, { expireAfterSeconds: 7_776_000 })],
             ['audit_log.userId', db.collection('audit_log').createIndex({ userId: 1, createdAt: -1 })],
             ['audit_log.action', db.collection('audit_log').createIndex({ action: 1, createdAt: -1 })],
+            ['deploy_locks.expiresAt (ttl)', db.collection('deploy_locks').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })],
         ];
 
         const results = await Promise.allSettled(tasks.map(([, promise]) => promise));
